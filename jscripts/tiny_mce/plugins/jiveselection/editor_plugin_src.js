@@ -2,7 +2,7 @@
  * $Revision$
  * $Date$
  *
- * Copyright (C) 1999-2010 Jive Software. All rights reserved.
+ * Copyright (C) 1999-2011 Jive Software. All rights reserved.
  *
  * This software is the proprietary information of Jive Software. Use is subject to license terms.
  */
@@ -37,6 +37,21 @@
     function isNonTerminalTextPos(treePos){
         var n = nodeAt(treePos);
         return (isTextPos(treePos) && !isTerminal(treePos)) || (n && n.nodeName.toLowerCase() == "br");
+    }
+
+    function getIsNodeNameAt(nodeName){
+        nodeName = nodeName.toLowerCase();
+        return function(treePos){
+            var n = nodeAt(treePos);
+            return n && n.nodeName && n.nodeName.toLowerCase() == nodeName;
+        }
+    }
+
+    function getIsContainerName(elementName){
+        elementName = elementName.toLowerCase();
+        return function(treePos){
+            return treePos && treePos.c.nodeType == 1 && treePos.c.nodeName.toLowerCase() == elementName;
+        }
     }
 
     function getSameContainer(targetNode){
@@ -86,6 +101,15 @@
         return {c: rng.endContainer, off: rng.endOffset};
     }
 
+    //Node name pretty printer
+    function nodeName(n){
+        var ret = n.nodeName;
+        if(ret == "#text"){
+            ret = "#" + n.nodeValue;
+        }
+        return ret;
+    }
+
     //noinspection JSUnusedLocalSymbols
     tinymce.create('tinymce.plugins.JiveSelectionPlugin', {
 
@@ -95,7 +119,65 @@
             this.isSelectionFrozen = false;
 
             var self = this;
-            if(!tinymce.isIE){
+
+
+            //Typing emulator
+            function fixedFromCharCode (codePt) {
+                if (codePt > 0xFFFF) {
+                    //handle unicode surrogate pairs
+                    codePt -= 0x10000;
+                    return String.fromCharCode(0xD800 + (codePt >> 10), 0xDC00 + (codePt & 0x3FF));
+                }
+                else {
+                    return String.fromCharCode(codePt);
+                }
+            }
+
+            function isEndOfTextNodeInsideAnchor(pos){
+                var parent = pos.c.parentNode;
+                return pos.c.nodeType == 3
+                        && pos.c.nodeValue.length == pos.off
+                        && parent.nodeName.toLowerCase() == "a"
+                        && pos.c == parent.lastChild;
+            }
+
+            //WebKit seems to try to do cursor management, but poorly. So we have to fake *typing*. Sigh.
+            function emulateTyping(predicate){
+                return function (ed, evt){
+                    var rng = ed.selection.getRng();
+                    var pos = startPos(rng);
+                    if(rng.collapsed && evt.charCode > 31
+                            && !evt.ctrlKey && !evt.altKey && !evt.metaKey
+                            && predicate(pos)){
+//                      console.log("Emulating typing");
+                        var s = fixedFromCharCode(evt.charCode);
+
+                        //figure out if the previous character was a space
+                        do{
+                            pos = self.dfsNext(pos, false);
+                        }while(pos && !isNonTerminalTextPos(pos));
+                        if(s == " " && /[ \xa0]/.test(charAtPos(pos))){
+                            s = "\xa0"; //nbsp, because chrome is weird about consecutive spaces.
+                        }
+                        var n = ed.getDoc().createTextNode(s);
+
+                        //figure out where we're putting the new character
+                        var insertPos = startPos(rng);
+                        while(isTextPos(insertPos)){
+                            insertPos = self.dfsNext(insertPos, true);
+                        }
+
+                        //insert the new character
+                        insertPos.c.insertBefore(n, nodeAt(insertPos));
+                        rng.setStart(n, s.length);
+                        rng.collapse(true);
+                        self.setSelection(rng, true);
+                        evt.preventDefault();
+                    }
+                };
+            }
+
+            if(!tinymce.isIE || tinymce.isIE9){
                 //when someone removes a bit of formatting, the cursor will be in an odd spot.  We need to leave it there.
                 ed.onFormatChange.add(function(format, added){
                     if(format.inline && !added){
@@ -103,7 +185,7 @@
 //                        console.log("freezing selection");
                     }
                 });
-            
+
                 //noinspection JSUnusedLocalSymbols
                 ed.onNodeChange.addToTop(function(ed, cm, n) {
                     if(!self.isSelectionFrozen){
@@ -119,51 +201,108 @@
                 ed.onKeyDown.add(thaw);
                 ed.onMouseDown.add(thaw);
 
+
                 if(tinymce.isWebKit){
-                    function fixedFromCharCode (codePt) {
-                        if (codePt > 0xFFFF) {
-                            //handle unicode surrogate pairs
-                            codePt -= 0x10000;
-                            return String.fromCharCode(0xD800 + (codePt >> 10), 0xDC00 + (codePt & 0x3FF));
+                    function webkitFixPredicate(pos){
+                        return pos.c.nodeType == 1;
+                    }
+                    ed.onKeyPress.add(emulateTyping(webkitFixPredicate));
+                }
+
+                //Special cursor handling for links.
+                var isAnchor = getIsNodeNameAt("a");
+                var isAfterAnchor = function(pos){
+                    if(pos.off > 0){
+                        return isAnchor({c: pos.c, off: pos.off-1});
+                    }
+                    return false;
+                };
+                var isInAnchor = getIsContainerName("a");
+
+                ed.onKeyPress.add(emulateTyping(isEndOfTextNodeInsideAnchor));
+
+                ed.onKeyDown.add(function(ed, evt){
+                    //handle arrow keys near link boundaries
+                    var keyCode = evt.keyCode;
+                    if(ed.selection.isCollapsed() && (keyCode == 37 || keyCode == 39 || keyCode == 8 || keyCode == 46)){
+                        var rng = ed.selection.getRng(true);
+                        var pos = startPos(rng);
+
+                        //Handle these:
+                        //before, in text node or a's container
+                        //front, in a or text node
+                        //back, in a or text node
+                        //after, in a's container or text node
+                        var nextPos = self.dfsNext(pos, true);
+                        var prevPos = self.dfsNext(pos, false);
+                        var targetPos = null;
+                        if (isAnchor(pos) || (isTextPos(pos) && isTerminal(pos) && isAnchor(nextPos))) {
+                            //Before
+                            var anchorPos = isAnchor(pos) ? pos : nextPos;
+                            if (keyCode == 39) {
+                                //right-arrow
+                                targetPos = {c: nodeAt(anchorPos), off: 0};
+                                evt.preventDefault();
+                            }else if(keyCode == 46){
+                                //delete
+                                targetPos = {c: nodeAt(anchorPos), off: 0};
+                            }
+                        }else if((isInAnchor(pos) && pos.off == 0) || (pos.off == 0 && prevPos.off == 0 && isInAnchor(prevPos))){
+                            //Front
+                            var frontPos = isInAnchor(pos) ? pos : prevPos;
+                            if (keyCode == 37) {
+                                //left-arrow
+                                targetPos = posFor(frontPos.c);
+                                evt.preventDefault();
+                            }else if(keyCode == 8){
+                                //backspace
+                                targetPos = posFor(frontPos.c);
+                            }
+                        }else if((isInAnchor(pos) && isTerminal(pos)) || (isTerminal(nextPos) && isInAnchor(nextPos))){
+                            //Back
+                            var backPos = isInAnchor(pos) ? pos : nextPos;
+                            if (keyCode == 39) {
+                                targetPos = posFor(backPos.c);
+                                targetPos.off += 1;
+                                //right-arrow
+                                evt.preventDefault();
+                            }else if(keyCode == 46){
+                                //delete
+                                targetPos = posFor(backPos.c);
+                                targetPos.off += 1;
+                            }
+                        }else if(isAfterAnchor(pos) || (isAfterAnchor(prevPos))){
+                            //After
+                            var afterPos = isAfterAnchor(pos) ? pos : prevPos;
+                            if (keyCode == 37) {
+                                //left-arrow
+                                var anchor = nodeAt({c: afterPos.c, off: afterPos.off-1});
+                                targetPos = {c: anchor, off: anchor.childNodes.length};
+                                evt.preventDefault();
+                            }else if(keyCode == 8){
+                                //backspace
+                                anchor = nodeAt({c: afterPos.c, off: afterPos.off-1});
+                                targetPos = {c: anchor, off: anchor.childNodes.length};
+                            }
                         }
-                        else {
-                            return String.fromCharCode(codePt);
+
+                        if(targetPos){
+                            setRangeStart(rng, targetPos);
+                            rng.collapse(true);
+                            ed.selection.setRng(rng);
                         }
                     }
-                    //WebKit seems to try to do cursor management, but poorly. So we have to fake *typing*. Sigh.
-                    ed.onKeyPress.add(function(ed, evt){
-                        var rng = ed.selection.getRng();
-                        if(rng.collapsed && evt.charCode > 31 && rng.startContainer.nodeType == 1
-                                && !evt.ctrlKey && !evt.altKey && !evt.metaKey){
-//                            console.log("Emulating typing");
-                            var s = fixedFromCharCode(evt.charCode);
-
-                            var pos = startPos(rng);
-                            do{
-                                pos = self.dfsNext(pos, false);
-                            }while(pos && !isNonTerminalTextPos(pos));
-                            if(s == " " && /[ \xa0]/.test(charAtPos(pos))){
-                                s = "\xa0"; //nbsp, because chrome is weird about consecutive spaces.
-                            }
-                            var n = ed.getDoc().createTextNode(s);
-                            rng.startContainer.insertBefore(n, nodeAt({c: rng.startContainer, off: rng.startOffset}));
-                            rng.setStart(n, s.length);
-                            rng.collapse(true);
-                            self.setSelection(rng, true);
-                            evt.preventDefault();
-                        }
-                    });
-                }
-//                function logSelInfo(ed, evt){
-//                    self.logSelection(evt.type + ": ");
-//                }
-//                ed.onKeyDown.addToTop(logSelInfo);
-//                ed.onKeyDown.add(logSelInfo);
-//                ed.onKeyPress.addToTop(logSelInfo);
-//                ed.onKeyPress.add(logSelInfo);
-//                ed.onKeyUp.addToTop(logSelInfo);
-//                ed.onKeyUp.add(logSelInfo);
+                });
             }
+//            function logSelInfo(ed, evt){
+//                self.logSelection(evt.type + ": ");
+//            }
+//            ed.onKeyDown.addToTop(logSelInfo);
+//            ed.onKeyDown.add(logSelInfo);
+//            ed.onKeyPress.addToTop(logSelInfo);
+//            ed.onKeyPress.add(logSelInfo);
+//            ed.onKeyUp.addToTop(logSelInfo);
+//            ed.onKeyUp.add(logSelInfo);
         },
 
         /**
@@ -175,25 +314,29 @@
             if(!msg){
                 msg = "";
             }
-            function nodeName(n){
-                var ret = n.nodeName;
-                if(ret == "#text"){
-                    ret = "#" + n.nodeValue;
-                }
-                return ret;
-            }
+
             var sel = this.ed.selection.getSel();
             if(sel.rangeCount == 0){
                 //DON'T Comment out these log statements
                 console.log(msg + "No selection.");
             }else{
                 var direction = this.isForwardSelection() ? "->" : "<-";
-                console.log(msg + ": current selection range: " + nodeName(rng.startContainer) + "[" + rng.startOffset + "] - " + nodeName(rng.endContainer) + "[" + rng.endOffset + "] Direction " + direction , rng);
-                console.log("Anchor-focus, base-extent: " + nodeName(sel.anchorNode) + "[" + sel.anchorOffset + "] - " +
-                        nodeName(sel.focusNode) + "[" + sel.focusOffset + "]" +
-                        (sel.baseNode != null ? ", " + nodeName(sel.baseNode) +
-                                "[" + sel.baseOffset + "] - " + nodeName(sel.extentNode) + "[" + sel.extentOffset + "]" : ""));
+                console.log(msg + "current selection range: " + this.posStr(rng.startContainer, rng.startOffset) + " - " + this.posStr(rng.endContainer, rng.endOffset) + " Direction " + direction , rng);
+                if(sel.anchorNode){
+                    console.log("Anchor-focus" + (sel.baseNode != null ? ", base-extent: " : ": ") + this.posStr(sel.anchorNode, sel.anchorOffset) + " - " +
+                        this.posStr(sel.focusNode, sel.focusOffset) +
+                        (sel.baseNode != null ? ", " + this.posStr(sel.baseNode, sel.baseOffset) + " - " + this.posStr(sel.extentNode, sel.extentOffset) : ""));
+                }
             }
+        },
+
+        posStr: function posStr(n, off){
+            var nodeIndex = tinymce.activeEditor.dom.nodeIndex;
+            var pstr = "";
+            if(n.parentNode && n.parentNode.nodeName != "HTML"){
+                pstr = posStr(n.parentNode, nodeIndex(n)) + "/";
+            }
+            return pstr + nodeName(n) + "[" + off + "]";
         },
 
         /**
@@ -205,21 +348,17 @@
             if(!msg){
                 msg = "";
             }
-            function nodeName(n){
-                var ret = n.nodeName;
-                if(ret == "#text"){
-                    ret = "#" + n.nodeValue;
-                }
-                return ret;
-            }
             //DON'T Comment out this log statement
-            console.log(msg + ": range: " + nodeName(rng.startContainer) + "[" + rng.startOffset + "] - " + nodeName(rng.endContainer) + "[" + rng.endOffset + "]", rng);
+            console.log(msg + ": range: " + this.posStr(rng.startContainer, rng.startOffset) + " - " + this.posStr(rng.endContainer, rng.endOffset), rng);
         },
 
         normalizeSelection: function(){
-            if(!tinymce.isIE){
+            if(!tinymce.isIE || tinymce.isIE9){
                 var selection = this.ed.selection;
                 var sel = selection.getSel();
+                if(!sel){
+                    return; //we got called too early, nothing to do.
+                }
                 if(sel.rangeCount == 0){
                     console.log("range count was 0 when attempting to normalize selection");
                     return;
@@ -229,7 +368,21 @@
 
                 var isForward = this.isForwardSelection(sel);
                 var origRng = selection.getRng(true);
-                var newRng = this.normalizeRange(origRng);
+                var fooRng = origRng;
+
+                if(fooRng.startContainer == fooRng.endContainer &&
+                        fooRng.startOffset == fooRng.endOffset &&
+                        fooRng.startContainer.nodeName.toLowerCase() == "body"){
+                    var offset = fooRng.startOffset;
+                    if(offset < fooRng.startContainer.childNodes.length){
+                        var newNode = fooRng.startContainer.childNodes[offset];
+                        fooRng = this.ed.dom.createRng();
+                        fooRng.setStart(newNode, 0);
+                        fooRng.setEnd(newNode, 0);
+                    }
+                }
+
+                var newRng = this.normalizeRange(fooRng);
                 if(newRng.compareBoundaryPoints(newRng.START_TO_START, origRng) != 0 || newRng.compareBoundaryPoints(newRng.END_TO_END, origRng) != 0){
                     this.setSelection(newRng, isForward);
                 }
@@ -313,6 +466,11 @@
             }
         },
 
+        /**
+         * Moves the selection endpoints to be before or after the markers, not inside them.
+         * @param rng The range to be modified
+         * @param includeMarkers Whether to include the markers in the range.  Default true.
+         */
         adjustForBookmark: function(rng, includeMarkers){
             if(includeMarkers == null){
                 includeMarkers = true;
@@ -383,22 +541,49 @@
         },
 
         /**
+         * A list is effectively empty if it contains nothing but ul, ol, li, br and empty or whitespace text nodes.
+         *
+         * @param n node to examine
+         * @return true IFF the list is effectively empty
+         */
+        isEffectivelyEmptyList: function (n){
+            var listRe = /^(?:ul|ol|li)$/i;
+            if(listRe.test(n.nodeName)){
+                var c = n.firstChild;
+                while(c){
+                    if(listRe.test(c.nodeName)){
+                        if(!this.isEffectivelyEmptyList(c)){
+                            return false;
+                        }
+                    }else if(c.nodeType != 3 && c.nodeName.toLowerCase() != "br" ||
+                       c.nodeType == 3 && tinymce.trim(c.nodeValue).length > 0){
+                        return false;
+                    }
+                    c = c.nextSibling;
+                }
+                return true;
+            }
+            return false;
+        },
+
+        /**
          * Split the range's commonAncestorContainer at both endpoints, and return a new range selecting the middle
          * segment.
          * @param rng The range to operate on.
-         * @param stopPredicate(node) determines whether it's safe to split the given node, otherwise we stop there.  Defaults to stop on body/pre/li/td.
+         * @param stopPredicate(node) determines whether it's safe to split the given node, otherwise we stop there.  Defaults to stop on body/pre/td.
          */
-        splitAtEndpoints: function(rng, stopPredicate){
+        splitAtEndpoints: function(rng, stopPredicate) {
             var ed = this.ed, dom = ed.dom, that = this;
             //create endpoint markers
-            function placeNewMarker(pos){
-                if(isTextPos(pos)){
-                    if(pos.off == 0){
+            function placeNewMarker(pos) {
+                if (isTextPos(pos)) {
+                    if (pos.off == 0) {
                         pos = posFor(pos.c);
-                    }else if(pos.off == pos.c.nodeValue.length){
+                    } else if (pos.off == pos.c.nodeValue.length) {
                         pos = posFor(pos.c);
                         pos.off += 1;
-                    }else{
+                    }
+                    else {
                         pos = posFor(pos.c.splitText(pos.off));
                     }
                 }
@@ -407,40 +592,72 @@
                 pos.c.insertBefore(marker, refNode);
                 return marker;
             }
+
             var endMarker = placeNewMarker(endPos(rng));
-            var startMarker = placeNewMarker(startPos(rng));
+            var startMarker = null;
+            if(!rng.collapsed){
+                startMarker = placeNewMarker(startPos(rng));
+            }
 
             rng = dom.createRng();
-            rng.setStartBefore(startMarker);
-            rng.setEndAfter(endMarker);
+            if(startMarker){
+                rng.setStartBefore(startMarker);
+                rng.setEndAfter(endMarker);
+            }else{
+                rng.selectNode(endMarker);
+            }
 
-            if(!stopPredicate){
-                var blockContainerNames = /^(?:body|pre|td|li)$/i;
-                stopPredicate = function defaultStopPredicate(n){
-                    return blockContainerNames.test(n.nodeName);
+            if (!stopPredicate) {
+                stopPredicate = "body, pre, td";
+            }
+            if (typeof stopPredicate == "string") {
+                var selector = stopPredicate;
+                stopPredicate = function(n) {
+                    return ed.dom.is(n,selector);
                 }
             }
             //split on markers until you reach the target container's level
             function deepSplit(targetContainer, splitOn) {
-                while(splitOn.parentNode != targetContainer && !stopPredicate(splitOn.parentNode)){
+                while (splitOn.parentNode != targetContainer && !stopPredicate(splitOn.parentNode)) {
                     dom.split(splitOn.parentNode, splitOn);
                 }
-                if(splitOn.nextSibling && splitOn.nextSibling.nodeType == 1 && that.isEffectivelyEmpty(splitOn.nextSibling)){
+                if (splitOn.nextSibling && splitOn.nextSibling.nodeType == 1 && (that.isEffectivelyEmpty(splitOn.nextSibling) || that.isEffectivelyEmptyList(splitOn.nextSibling))) {
                     dom.remove(splitOn.nextSibling);
                 }
             }
-            var stopNode = rng.commonAncestorContainer.parentNode;
+
+            var stopNode = null;
+            if (rng.commonAncestorContainer.nodeName.toLowerCase() == "li") {
+                //if we're selecting things inside a single LI, stop there
+                stopNode = rng.commonAncestorContainer;
+            } else if (rng.commonAncestorContainer.parentNode.nodeName.toLowerCase() == "ul" || rng.commonAncestorContainer.parentNode.nodeName.toLowerCase() == "ol") {
+                //never stop splitting at the ul/ol level
+                stopNode = rng.commonAncestorContainer.parentNode.parentNode;
+            }
+            else {
+                stopNode = rng.commonAncestorContainer.parentNode;
+            }
+
             deepSplit(stopNode, endMarker);
-            deepSplit(stopNode, startMarker);
+            if(startMarker){
+                deepSplit(stopNode, startMarker);
+            }
 
             //return a range selecting the middle bit
-            var pos = posFor(startMarker);
-            dom.remove(startMarker);
-            setRangeStart(rng, pos);
+            if(startMarker){
+                var pos = posFor(startMarker);
+                dom.remove(startMarker);
+                setRangeStart(rng, pos);
 
-            pos = posFor(endMarker);
-            dom.remove(endMarker);
-            setRangeEnd(rng, pos);
+                pos = posFor(endMarker);
+                dom.remove(endMarker);
+                setRangeEnd(rng, pos);
+            }else{
+                pos = posFor(endMarker);
+                dom.remove(endMarker);
+                setRangeStart(rng, pos);
+                rng.collapse(true);
+            }
 
             return rng;
         },
@@ -513,6 +730,31 @@
                 console.log("error expanding range: ", ex, rng);
                 return null;
             }
+        },
+
+        getShrunkenBlockRange: function getShrunkenBlockRange(rng, blockSelector){
+            var dom = this.ed.dom;
+            var ret = rng.cloneRange();
+
+            rng = this.normalizeRange(rng);
+            this.adjustForBookmark(rng, true);
+
+            if(blockSelector == null){
+                blockSelector = function(n){
+                    return dom.isBlock(n);
+                };
+            }
+
+            if(rng.startContainer == rng.endContainer && rng.startOffset + 1 == rng.endOffset){
+                //one node is selected
+                var selectedNode = nodeAt(startPos(rng));
+                if(dom.is(selectedNode, blockSelector)){
+                    //it's a block.  So select it's contents instead.
+                    ret.surroundContents(selectedNode);
+                    ret = getShrunkenBlockRange(ret, blockSelector); //keep shrinking as necessary.
+                }
+            }
+            return ret;
         },
 
         dfsNext: function (treePos, isForward, isRoot){
@@ -631,8 +873,12 @@
                     var n = nodeAt(treePos);
                     return treePos.c.nodeName.toLowerCase() == "br" || (n && n.nodeName.toLowerCase() == "br");
                 }
+                function isET(treePos){
+                    var n = nodeAt(treePos);
+                    return isEmptyTextNodePos(treePos) || (n && n.nodeType == 3 && n.nodeValue == "");
+                }
                 //skip over BR elements and empty text nodes
-                while(isBr(treePos) || isEmptyTextNodePos(treePos)){
+                while(isBr(treePos) || isET(treePos)){
                     treePos = self.dfsNext(treePos, true, isBody);
                 }
                 while(treePos && isTerminal(treePos) && (!lastTreePos || lastTreePos.c.parentNode == treePos.c)){
@@ -643,7 +889,7 @@
                     do{
                         treePos = self.dfsNext(treePos, true, isBody);
                         //skip over BR elements and empty text nodes
-                    }while(isBr(treePos) || isEmptyTextNodePos(treePos));
+                    }while(isBr(treePos) || isET(treePos));
                 }
                 return null;
             }
@@ -814,6 +1060,10 @@
                 return isBlockNode(n) || isBlockNodeTerminalChild(treePos);
             }
 
+            function isInBlock(treePos){
+                return isBlockNode(treePos.c);
+            }
+
             function isBlockNodeTerminalChild(treePos){
                 return isBlockNode(treePos.c) && !nodeAt(treePos);
             }
@@ -853,21 +1103,6 @@
 
             function isNonEdgeTextPos(treePos){
                 return isTextPos(treePos) && treePos.off > 0;
-            }
-
-            function getIsContainerName(elementName){
-                elementName = elementName.toLowerCase();
-                return function(treePos){
-                    return treePos && treePos.c.nodeType == 1 && treePos.c.nodeName.toLowerCase() == elementName;
-                }
-            }
-
-            function getIsNodeNameAt(nodeName){
-                nodeName = nodeName.toLowerCase();
-                return function(treePos){
-                    var n = nodeAt(treePos);
-                    return n && n.nodeName && n.nodeName.toLowerCase() == nodeName;
-                }
             }
 
             function predicateAnd(){
@@ -910,7 +1145,7 @@
                     return treePos;
                 } else {
                     //there's no nearby text node, select the nearest block node.
-                    treePos = lookBothWays({c: c, off: off}, isBlocklike, isBlockNodeTerminalChild, false, predicateOr(isBodyOrA, isInImg), isBodyOrA);
+                    treePos = lookBothWays({c: c, off: off}, predicateOr(isInBlock, isBlocklike), predicateOr(isInBlock, isBlockNodeTerminalChild), false, predicateOr(isBodyOrA, isInImg), isBodyOrA);
                     if (treePos) {
                         return treePos;
                     }

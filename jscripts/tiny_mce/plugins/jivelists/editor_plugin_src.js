@@ -1,4 +1,20 @@
+/*
+ * $Revision$
+ * $Date$
+ *
+ * Copyright (C) 1999-2011 Jive Software. All rights reserved.
+ *
+ * This software is the proprietary information of Jive Software. Use is subject to license terms.
+ */
 (function() {
+
+    function createMozBR(){
+        var dom = tinymce.activeEditor.dom;
+        return dom.create("br", {
+            "_moz_dirty": "",
+            "type": "_moz"
+        });
+    }
 
     //noinspection JSUnusedLocalSymbols
     tinymce.create('tinymce.plugins.JiveListsPlugin', {
@@ -10,14 +26,6 @@
         fixLists : function(ed){
             var n,l,p,br,li;
 
-            function createMozBR(){
-                var dom = tinymce.activeEditor.dom;
-                return dom.create("br", {
-                    "_moz_dirty": "",
-                    "type": "_moz"
-                });
-            }
-
             function createEmptyPara(){
                 var dom = tinymce.activeEditor.dom;
                 return dom.create("p", {}, "<br _moz_dirty='' type='_moz' />");
@@ -25,79 +33,90 @@
 
             this.onBeforeFixLists.dispatch(ed);
 
-            n = ed.selection.getNode();
-            var ul = ed.dom.getParent(n, "ol,ul");
-            if(ul != null && ul.nodeType == 1 && (ul.nodeName.toLowerCase() == "ul" || ul.nodeName.toLowerCase() == "ol")){
-                li = ul.parentNode;
-                if(li.nodeName.toLowerCase() == "li") {
-                    //our ul is the direct child of an li.  Move it up a level, so ul becomes li.nextSibling
-                    p = li.parentNode;
-                    p.insertBefore(ul, li.nextSibling);
-                    if (ed.plugins.jiveselection.isEffectivelyEmpty(li)) {
-                        p.removeChild(li);
+            var that = this;
+            ed.undoManager.transparentChange(function(){
+                n = ed.selection.getNode();
+                var ul = ed.dom.getParent(n, "ol,ul");
+                if(ul != null && ul.nodeType == 1 && (ul.nodeName.toLowerCase() == "ul" || ul.nodeName.toLowerCase() == "ol")){
+                    li = ul.parentNode;
+                    if(li.nodeName.toLowerCase() == "li") {
+                        //our ul is the direct child of an li.  Move it up a level, so ul becomes li.nextSibling
+                        p = li.parentNode;
+                        p.insertBefore(ul, li.nextSibling);
+                        if (ed.plugins.jiveselection.isEffectivelyEmpty(li)) {
+                            p.removeChild(li);
+                        }
+
+                        ed.selection.select(n);
+                        ed.selection.collapse(true);
                     }
-
-                    ed.selection.select(n);
-                    ed.selection.collapse(true);
+                    that.mergeConsecutiveLists(ul);
                 }
-                this.mergeConsecutiveLists(ul);
-            }
 
-            n = ed.dom.getParent(n, "li");
-            if(n != null && n.nodeType == 1 && n.nodeName.toLowerCase() == "li"){
-                l = ed.dom.getParent(n, "ol,ul");
-                if(l != null){
-                    if(tinymce.isGecko){
-                        for(var i=0;i<l.childNodes.length;i++){
-                            li = l.childNodes[i];
-                            if(li.nodeType == 1 && li.nodeName.toLowerCase() == "li" && li.childNodes.length == 0){
-                                // add an empty <br> to the li. empty li's are bad :(
-                                li.appendChild(createMozBR());
+                n = ed.dom.getParent(n, "li");
+                if(n != null && n.nodeType == 1 && n.nodeName.toLowerCase() == "li"){
+                    l = ed.dom.getParent(n, "ol,ul");
+                    if(l != null){
+                        if(tinymce.isGecko){
+                            for(var i=0;i<l.childNodes.length;i++){
+                                li = l.childNodes[i];
+                                if(li.nodeType == 1 && li.nodeName.toLowerCase() == "li" && li.childNodes.length == 0){
+                                    // add an empty <br> to the li. empty li's are bad :(
+                                    li.appendChild(createMozBR());
+                                }
                             }
                         }
-                    }
 
-                    if(l.parentNode.nodeName.toLowerCase() == "p"){
-                        //If the list is in a paragraph, move it before the paragraph, and delete the paragraph
-                        //This keeps cursor movement sane across browsers.
-                        p = l.parentNode;
+                        if(l.parentNode.nodeName.toLowerCase() == "p"){
+                            //If the list is in a paragraph, move it before the paragraph, and delete the paragraph
+                            //This keeps cursor movement sane across browsers.
+                            p = l.parentNode;
 
-                        //split the p on the list
-                        ed.dom.split(p, l);
+                            //split the p on the list
+                            ed.dom.split(p, l);
 
-                        ed.selection.select(n).collapse(true);
-                    }
-                }
-            }
-
-            if(this.lastList != null && this.lastList.parentNode != null){
-                // the list is still in the DOM, select the paragraph after it
-                n = this.lastList.nextSibling;
-                if(n != null){
-                    if(n.nodeType == 1 && n.nodeName.toLowerCase() == "br"){
-                        p = createEmptyPara();
-                        n.parentNode.insertBefore(p, n);
-                        n.parentNode.removeChild(n);
-                        br = p.childNodes[p.childNodes.length-1];
-                        ed.selection.select(br);
-                        ed.selection.collapse(true);
+                            ed.selection.select(n).collapse(true);
+                        }
                     }
                 }
-            }else if(this.lastPrevSib != null){
-                n = this.lastPrevSib.nextSibling;
-                if(n != null){
-                    if(n.nodeType == 1 && n.nodeName.toLowerCase() == "br"){
-                        p = createEmptyPara();
-                        n.parentNode.insertBefore(p, n);
-                        n.parentNode.removeChild(n);
-                        br = p.childNodes[p.childNodes.length-1];
-                        ed.selection.select(br);
-                        ed.selection.collapse(true);
+
+                if(that.lastList != null && that.lastList.parentNode != null){
+                    // the list is still in the DOM, select the paragraph after it
+                    n = that.lastList.nextSibling;
+                    if(n != null){
+                        if(n.nodeType == 1 && n.nodeName.toLowerCase() == "br"){
+                            p = createEmptyPara();
+                            n.parentNode.insertBefore(p, n);
+                            n.parentNode.removeChild(n);
+                            br = p.childNodes[p.childNodes.length-1];
+                            ed.selection.select(br);
+                            ed.selection.collapse(true);
+                        }
+                    }
+                }else if(that.lastPrevSib != null){
+                    n = that.lastPrevSib.nextSibling;
+                    if(n != null){
+                        if(n.nodeType == 1 && n.nodeName.toLowerCase() == "br"){
+                            p = createEmptyPara();
+                            n.parentNode.insertBefore(p, n);
+                            n.parentNode.removeChild(n);
+                            br = p.childNodes[p.childNodes.length-1];
+                            ed.selection.select(br);
+                            ed.selection.collapse(true);
+                        }
                     }
                 }
-            }
-            $j("ul, ol", ed.getBody()).each(function(){ed.plugins.jivelists.listTypeToStyle(this)}); //translate list type attributes to styles
+                that.fixListTypes();
+            });
             this.onAfterFixLists.dispatch(ed);
+        },
+
+        fixListTypes: function(){
+            var ed = this.ed;
+            //translate list type attributes to styles
+            $j("ul[type], ol[type]", ed.getBody()).each(function(){
+                ed.plugins.jivelists.listTypeToStyle(this)
+            });
         },
 
         mergeConsecutiveLists: function(list){
@@ -172,7 +191,7 @@
         },
 
         /**
-         * This method splits the range's comment ancestor container.  The contents of the range
+         * This method splits the range's common ancestor container.  The contents of the range
          * become direct children of the commonAncestorContainer.
          *
          * @param rng The range to split on.
@@ -296,6 +315,9 @@
                                 var li = ed.dom.create("li");
                                 if(ed.dom.isBlock(n)){
                                     ed.dom.replace(li, n, true);
+                                    if($j(n).css("text-align") != "left" && $j(n).css("text-align") != "start"){
+                                        $j(li).css("text-align", $j(n).css("text-align"))
+                                    }
                                 }else{
                                     //ACK! It's not a block.  Surround the rest of the selection in a single LI.
                                     rng.setStart(newList, i);
@@ -382,6 +404,8 @@
             }
 
 
+            var par = this.getSelectionParent("ol,ul");
+
             if(cmd.indexOf("mceOLListStyle") == 0){
                 ed.undoManager.add();
                 styleList("ol");
@@ -408,6 +432,9 @@
                                 if(!ed.plugins.jiveselection.isBookmark(n)){
                                     var p = ed.getDoc().createElement("p");
                                     n.parentNode.insertBefore(p, n);
+                                    if($j(n).css("text-align") != "left" && $j(n).css("text-align") != "start"){
+                                        $j(p).css("text-align", $j(n).css("text-align"))
+                                    }
                                     if(n.nodeType == 1){
                                         that.reparentChildren(p, n);
                                         n.parentNode.removeChild(n);
@@ -451,12 +478,18 @@
                 return true;
             }else if(cmd.indexOf("mceInsertUnorderedList") == 0){
                 ed.undoManager.add();
-                if(this.getSelectionParent("ul") != null){
+                if($j(par).is("ul")){
                     //already a list, unindent
                     ed.execCommand("mceOutdent");
-                }else if(this.getSelectionParent("ol") != null){
+                }else if($j(par).is("ol")){
                     //already a list, but wrong type
-                    makeList("ul", "li", "ol");
+                    var b = ed.selection.getBookmark(BOOKMARKTYPE);
+                    var ul = this.getSelectionParent("ol");
+                    var ol = ed.getDoc().createElement('ul');
+                    $j(ol).append($j(ul).contents());
+                    ul.parentNode.insertBefore(ol,ul);
+                    ul.parentNode.removeChild(ul);
+                    ed.selection.moveToBookmark(b);
                 }else{
                     makeList("ul");
                 }
@@ -464,12 +497,18 @@
                 return true;
             }else if(cmd.indexOf("mceInsertOrderedList") == 0){
                 ed.undoManager.add();
-                if(this.getSelectionParent("ol") != null){
+                if($j(par).is("ol")){
                     //already a list, unindent
                     ed.execCommand("mceOutdent");
-                }else if(this.getSelectionParent("ul") != null){
+                }else if($j(par).is("ul")){
                     //already a list, but wrong type
-                    makeList("ol", "li", "ul");
+                    var b = ed.selection.getBookmark(BOOKMARKTYPE);
+                    var ul = this.getSelectionParent("ul");
+                    var ol = ed.getDoc().createElement('ol');
+                    $j(ol).append($j(ul).contents());
+                    ul.parentNode.insertBefore(ol,ul);
+                    ul.parentNode.removeChild(ul);
+                    ed.selection.moveToBookmark(b);
                 }else{
                     makeList("ol");
                 }
@@ -534,15 +573,18 @@
             });
         },
 
-        hasNoTextNodes : function(node){
+        hasNoTextOrImgNodes : function(node){
             if(node.nodeType == 3){
                 //IE seems to like empty text nodes, but they normalize out.
                 return node.nodeValue == "";
             }
             var ret = true;
             if(node.nodeType == 1){
+                if(node.nodeName.toLowerCase() == "img"){
+                    return false;
+                }
                 for(var i=0;ret && i<node.childNodes.length;i++){
-                    ret = ret && this.hasNoTextNodes(node.childNodes[i]);
+                    ret = ret && this.hasNoTextOrImgNodes(node.childNodes[i]);
                 }
             }
             return ret;
@@ -600,37 +642,33 @@
             var t = this;
             this.index = 0;
             this.ol_styles = new Array();
-            this.ol_styles.push(["default",""]);
-            this.ol_styles.push(["none","none"]);
-            this.ol_styles.push(["inherit","inherit"]);
-            this.ol_styles.push(["d","decimal"]);
+            this.ol_styles.push(["default","", 0]);
+            this.ol_styles.push(["d","decimal", 1]);
             if(!tinymce.isIE){
-                this.ol_styles.push(["dz","decimal-leading-zero"]);
+                this.ol_styles.push(["dz","decimal-leading-zero", 2]);
             }
-            this.ol_styles.push(["ur","upper-roman"]);
-            this.ol_styles.push(["lr","lower-roman"]);
-            this.ol_styles.push(["ua","upper-alpha"]);
-            this.ol_styles.push(["la","lower-alpha"]);
+            this.ol_styles.push(["ur","upper-roman", 3]);
+            this.ol_styles.push(["lr","lower-roman", 4]);
+            this.ol_styles.push(["ua","upper-alpha", 5]);
+            this.ol_styles.push(["la","lower-alpha", 6]);
 
             if(!tinymce.isIE){
-                this.ol_styles.push(["lg","lower-greek"]);
-                this.ol_styles.push(["ki","katakana-iroha"]);
-                this.ol_styles.push(["k","katakana"]);
-                this.ol_styles.push(["hii","hiragana-iroha"]);
-                this.ol_styles.push(["hi","hiragana"]);
-                this.ol_styles.push(["ci","cjk-ideographic"]);
-                this.ol_styles.push(["g","georgian"]);
-                this.ol_styles.push(["a","armenian"]);
-                this.ol_styles.push(["he","hebrew"]);
+                this.ol_styles.push(["lg","lower-greek", 7]);
+                this.ol_styles.push(["ki","katakana-iroha", 8]);
+                this.ol_styles.push(["k","katakana", 9]);
+                this.ol_styles.push(["hii","hiragana-iroha", 10]);
+                this.ol_styles.push(["hi","hiragana", 11]);
+                this.ol_styles.push(["ci","cjk-ideographic", 12]);
+                this.ol_styles.push(["g","georgian", 13]);
+                this.ol_styles.push(["a","armenian", 14]);
+                this.ol_styles.push(["he","hebrew", 15]);
             }
 
             this.ul_styles = new Array();
-            this.ul_styles.push(["default",""]);
-            this.ul_styles.push(["none","none"]);
-            this.ul_styles.push(["inherit","inherit"]);
-            this.ul_styles.push(["s","square"]);
-            this.ul_styles.push(["c","circle"]);
-            this.ul_styles.push(["di","disc"]);
+            this.ul_styles.push(["default","", 0]);
+            this.ul_styles.push(["di","disc", 1]);
+            this.ul_styles.push(["c","circle", 2]);
+            this.ul_styles.push(["s","square", 3]);
 
 
 
@@ -640,13 +678,20 @@
                 }
             });
 
+            ed.onSetContent.add(function(){
+                t.fixListTypes();
+            });
+
             ed.onNodeChange.add(function(ed){
                 if(this.initialized){
                     this.fixLists(ed);
                     var node = ed.selection.getNode();
                     var n = ed.dom.getParent(node, "ul,ol");
                     if(n){
-                        this.cleanList(ed, n);
+                        var that = this;
+                        ed.undoManager.transparentChange(function(){
+                            that.cleanList(ed, n);
+                        });
                     }
                 }
             }, this);
@@ -672,12 +717,72 @@
                     }, this);
                 }
 
+                if(ed.plugins.jivecontextmenu){
+                    var contextMenu = ed.plugins.jivecontextmenu;
+
+                    function makeMenuItems(styles, listType){
+                        listType = listType.toUpperCase();
+                        var defaultX, defaultY, xOffset, yOffset;
+                        if(listType == "UL"){
+                            defaultX = 288;
+                            defaultY = 0;
+                            xOffset = 81;
+                            yOffset = 158;
+                        } else if(listType == "OL"){
+                            defaultX = 260;
+                            defaultY = 0;
+                            xOffset = 81;
+                            yOffset = 135;
+                        }
+
+                        var ret = [];
+                        for(var i = 0; i < styles.length; ++i){
+                            var styleName = styles[i][0];
+                            //ol starts at 81,135
+                            //ul starts at 81,158
+                            //all 28x22
+                            var x = i == 0 ? defaultX : xOffset + (styles[i][2]-1) * 28;
+                            var y = i == 0 ? defaultY : yOffset;
+                            ret.push(new contextMenu.MenuItem(styleName + "ListStyle", null, ed.getLang("jivelists." + styleName), {
+                                url: "../../../../../../images/tiny_mce3/themes/advanced/img/iconmaster.gif",
+                                xOffset: x,
+                                yOffset: y,
+                                width: 28,
+                                height: 23
+                            }, "mce" + listType + "ListStyle" + i));
+                        }
+                        return ret;
+                    }
+
+                    var ulStyleItems = makeMenuItems(this.ul_styles, "UL");
+                    var ulMenu = new contextMenu.Menu(ulStyleItems, true, true, ed.getLang("jivelists.list_style_hdr"));
+                    var ulItem = new contextMenu.MenuItem("ulItem", /ul/i, null, {
+                            url: "../../../../../../images/tiny_mce3/themes/advanced/img/iconmaster.gif",
+                            xOffset: 288,
+                            yOffset: 0,
+                            width: 28,
+                            height: 23
+                        }, ulMenu);
+                    contextMenu.addRootItem(ulItem);
+
+                    var olStyleItems = makeMenuItems(this.ol_styles, "OL");
+                    var olMenu = new contextMenu.Menu(olStyleItems, true, true, ed.getLang("jivelists.list_style_hdr"));
+                    var olItem = new contextMenu.MenuItem("olItem", /ol/i, null, {
+                            url: "../../../../../../images/tiny_mce3/themes/advanced/img/iconmaster.gif",
+                            xOffset: 260,
+                            yOffset: 0,
+                            width: 28,
+                            height: 23
+                        }, olMenu);
+                    contextMenu.addRootItem(olItem);
+
+                }
                 if (ed.plugins.contextmenu) {
                     ed.plugins.contextmenu.onContextMenu.add(function(th, m, e) {
                         var sm, par, last, list, i, clz;
 
-                        if (ed.dom.getParent(e, 'ol')){
-                            par = ed.dom.getParent(e, 'ol');
+                        par = ed.dom.getParent(e, 'ol, ul');
+                        if (par && par.nodeName.toLowerCase() == "ol"){
                             last = ed.dom.getParent(e, function(x){
                                 return $def(x.tagName) && x.tagName.toLowerCase() == "ol" && x != par;
                             });
@@ -700,8 +805,7 @@
                                 }
                             }
 
-                        }else if(ed.dom.getParent(e, 'ul')){
-                            par = ed.dom.getParent(e, 'ul');
+                        }else if(par && par.nodeName.toLowerCase() == "ul"){
                             last = ed.dom.getParent(e, function(x){
                                 return $def(x.tagName) && x.tagName.toLowerCase() == "ul" && x != par;
                             });
@@ -740,6 +844,7 @@
 
                 var isEffectivelyEmpty = ed.plugins.jiveselection.isEffectivelyEmpty;
 
+                var rng;
                 var sel = ed.selection;
                 var li = ed.dom.getParent(sel.getNode(), 'li');
                 var list = ed.dom.getParent(sel.getNode(), 'ul,ol');
@@ -814,6 +919,7 @@
                             nextBlock = getNextBlock(blockContainer);
                             if(nextBlock && (ed.plugins.jiveselection.atEndOf(blockContainer) || isEffectivelyEmpty(blockContainer))){
                                 ed.undoManager.add();
+                                var bm = ed.selection.getBookmark();
                                 removeTrailingBr(blockContainer);
                                 this.reparentChildren(blockContainer, nextBlock);
                                 var par = nextBlock.parentNode;
@@ -825,6 +931,7 @@
                                 }
 
                                 this.prepForDel = true;
+                                ed.selection.moveToBookmark(bm);
                                 ed.undoManager.add();
                                 tinymce.dom.Event.cancel(e);
                                 return false;
@@ -833,20 +940,54 @@
                     }
                 }else if(e.keyCode == 13 && !e.shiftKey){ // enter key
                     if(li != null &&
-                            li.nodeType == 1 &&
-                            li.nextSibling == null &&
-                            (li.childNodes.length == 1 || (tinymce.isIE && li.childNodes.length == 0) )&&
-                            this.hasNoTextNodes(li)){
-                        this.prepForEnter = true;
+                            li.nodeType == 1){
+                        if(this.hasNoTextOrImgNodes(li) &&
+                                li.nextSibling == null){
+                            //enter in empty li, outdent
+                            this.prepForEnter = true;
 
-                        ed.execCommand("mceOutdent");
-                        tinymce.dom.Event.cancel(e);
-                        return false;
+                            ed.execCommand("mceOutdent");
+                            tinymce.dom.Event.cancel(e);
+                            return false;
+                        }else if(tinymce.isGecko && ed.plugins.jiveselection.atEndOf(li)){
+                            this.prepForEnter = true;
+                            //enter at the end of non-empty li
+                            //get current format element heirarchy
+                            var formatElems = [];
+                            rng = ed.plugins.jiveselection.normalizeRange(sel.getRng(true));
+                            var n = rng.startContainer;
+                            while(n != li){
+                                if(n.nodeType == 1 && !ed.dom.isBlock(n)){
+                                    formatElems.push(n);
+                                }
+                                n = n.parentNode;
+                            }
+
+                            //create a new nextSibling li, and copy formats
+                            var newLi = ed.dom.create("li");
+                            li.parentNode.insertBefore(newLi, li.nextSibling);
+                            n = newLi;
+                            while(formatElems.length){
+                                var newElem = formatElems.pop().cloneNode(false);
+                                n.appendChild(newElem);
+                                n = newElem;
+                            }
+                            newLi.appendChild(createMozBR());
+
+                            //position cursor
+                            rng = ed.dom.createRng();
+                            rng.setStart(n, 0);
+                            rng.collapse(true);
+                            ed.plugins.jiveselection.setSelection(rng, true);
+
+                            tinymce.dom.Event.cancel(e);
+                            return false;
+                        }
                     }
                 }else if(e.keyCode == 13 && e.shiftKey){
                     // shift enter, so put in a <br>
                     var block = li ? li : ed.dom.getParent(sel.getNode(), function(n){return ed.dom.isBlock(n);});
-                    var rng = sel.getRng(true);
+                    rng = sel.getRng(true);
                     if(rng.collapsed){
                         this.prepForEnter = true;
 

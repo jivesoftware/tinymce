@@ -13,7 +13,6 @@ function trimContent(content) {
 	return content;
 }
 
-
 function normalizeContentWhitespace(content){
     return trimContent(content.replace(/[\r\n]+/g, ''));
 }
@@ -30,7 +29,9 @@ function checkContent(ed, expected, message, stripProblems){
         message = "Document content";
     }
 
-    var actual = normalizeContentWhitespace(ed.getContent());
+    var actual = ed.getContent();
+    actual = actual.replace(/(_jivemacro_uid_\d+)/gi, "").replace(/( _jivemacro_uid=['"][^"']*['"])/gi, "");
+    actual = normalizeContentWhitespace(actual);
     expected = normalizeContentWhitespace(expected);
     if(actual == expected){
         equal(actual, expected, message);
@@ -57,6 +58,216 @@ function rangeEqual(value, expected){
             console.error("end container mismatch: actual, expected", value.endContainer, expected.endContainer);
         }
         equal(value.endOffset, expected.endOffset, "end offset");
+    }
+}
+
+function near(testVal, targetVal, err, msg){
+    if(!msg){
+        msg = "";
+    }
+    var diff = testVal - targetVal;
+    if(diff > err){
+        msg += " ERR: " + testVal + " > " + targetVal + " + " + err;
+        console.log(msg);
+        ok(false, msg);
+    }else if(-diff > err){
+        msg += " ERR: " + testVal + " < " + targetVal + " - " + err;
+        console.log(msg);
+        ok(false, msg);
+    }else{
+        ok(true, msg);
+    }
+}
+
+/**
+ * Fakes a mouse event.
+ *
+ * @param {Element/String} e DOM element object or element id to send fake event to.
+ * @param {String} na Event name to fake like "click".
+ * @param {Object} o Optional object with data to send with the event like cordinates.
+ */
+function fakeMouseEvent(e, na, o) {
+	var ev;
+
+	e = tinymce.DOM.get(e);
+
+    var rect = tinymce.DOM.getRect(e);
+
+    //middle of the element
+    //todo: screen coordinates
+    var defaults = {
+        detail : 1,
+        screenX : 0,
+        screenY : 0,
+        clientX : rect.x + (rect.w/2),
+        clientY : rect.y + (rect.h/2),
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+        metaKey: false,
+        button: 0
+    };
+
+    o = tinymce.extend(defaults, o);
+
+	if (e.fireEvent) {
+		ev = document.createEventObject();
+		tinymce.extend(ev, o);
+		e.fireEvent('on' + na, ev);
+		return;
+	}
+
+	ev = document.createEvent('MouseEvents');
+
+	if (ev.initMouseEvent)
+		ev.initMouseEvent(na, true, true, window, o.detail, o.screenX, o.screenY, o.clientX, o.clientY, o.ctrlKey, o.altKey, o.shiftKey, o.metaKey, o.button, null);
+
+	e.dispatchEvent(ev);
+}
+
+/**
+ * return true if the selected content has value somewhere in the attr
+ * @param content the jQuery object content to look inside of
+ * @param selector the selector to narrow down $content
+ * @param attr the attribute name
+ * @param value the value that must be contained in the attribute. can be a string, or an array of strings
+ */
+function has(content, selector, attr, value){
+    try{
+        if(typeof(value) == "string"){
+            return $j(content).find(selector).attr(attr).toLowerCase().indexOf(value.toLowerCase()) >= 0
+        }
+        var ret = false;
+        for(var i=0;i<value.length;i++){
+            ret = ret || $j(content).find(selector).attr(attr).toLowerCase().indexOf(value[i].toLowerCase()) >= 0
+        }
+        return ret;
+    }catch(e){
+        return false;
+    }
+}
+
+/**
+ * return true if the selected content has value somewhere in the css attr
+ * @param content the jQuery object content to look inside of
+ * @param selector the selector to narrow down $content
+ * @param attr the attribute name
+ * @param value the value that must be contained in the attribute. can be a string, or an array of strings
+ */
+function hasStyle(content, selector, attr, value, message){
+    try{
+
+        var expected = value;
+        var ret = false;
+
+        if(typeof(attr) == "string"){
+            attr = [attr];
+        }
+        if(typeof(value) != "string"){
+            expected = value.join (" or ");
+        }
+        if(typeof(value) == "string"){
+            value = [value];
+        }
+
+        var cssText = $j(content).find(selector).get(0).style.cssText.toLowerCase();
+        var cssSplit = cssText.split(";");
+        for(var i=0;i<cssSplit.length;i++){
+            var cssVarVal = $j.trim(cssSplit[i]).split(":");
+            if(cssVarVal.length > 1){
+                for(var j=0;j<attr.length;j++){
+                    if(cssVarVal[0].indexOf(attr[j]) === 0){
+                        for(var k=0;k<value.length;k++){
+                            value[k] = value[k].toLowerCase();
+                            if(cssVarVal[1].indexOf(value[k]) >= 0){
+                                // the css value exists
+                                return push(true, cssSplit, attr[j] + ":" + expected, message);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return push(false, cssText, attr.join(" or ") + ":" + expected, message);
+    }catch(e){
+        return false;
+    }
+}
+
+/**
+ * Fake a click sequence, either synchronously or asynchronously.
+ * @param elem
+ * @param cb null (default) for synchronous, function for async.  cb is called after the click event.
+ */
+function click(elem, cb){
+    try{
+        var seq = ["mousedown", "mouseup", "click"];
+
+        var ed = tinymce.activeEditor;
+        if(ed.getDoc() == elem.ownerDocument){
+            var rng = ed.dom.createRng();
+
+            if(elem.hasChildNodes()){
+                rng.setStart(elem, 0);
+                rng.collapse(true);
+            }else{
+                var nodeIndex = ed.dom.nodeIndex(elem);
+                rng.setStart(elem.parentNode, nodeIndex);
+                rng.setEnd(elem.parentNode, nodeIndex+1);
+            }
+
+            //console.log("setting selection", rng);
+            ed.selection.setRng(rng);
+        }
+
+        mouseSequence(elem, seq, cb);
+    }catch(e){
+        // noop
+    }
+}
+
+/**
+ * Fake an arbitrary sequence of mouse events on an element, and call a callback after.
+ * @param elem The target element for the events
+ * @param seq The sequence of events.
+ * @param cb The callback.  Optional.  If present, it's scheduled for the next tick after the final event.
+ */
+function mouseSequence(elem, seq, cb){
+    function mouseTick(seqNum){
+        setTimeout(function(){
+            var eventParams = seq[seqNum];
+            if(typeof(eventParams) == "string"){
+                fakeMouseEvent(elem, eventParams);
+            }else{
+                //object
+                var type = eventParams.type;
+                delete eventParams.type;
+                fakeMouseEvent(elem, type, eventParams);
+            }
+            ++seqNum;
+            if(seqNum < seq.length){
+                mouseTick(seqNum);
+            }else{
+                setTimeout(cb, 0);
+            }
+        }, 0);
+    }
+
+    if(cb){
+        mouseTick(0);
+    }else{
+        for(var i = 0; i < seq.length; ++i){
+            var eventParams = seq[i];
+            if(typeof(eventParams) == "string"){
+                fakeMouseEvent(elem, eventParams);
+            }else{
+                //object
+                var type = eventParams.type;
+                delete eventParams.type;
+                fakeMouseEvent(elem, type, eventParams);
+            }
+        }
     }
 }
 
