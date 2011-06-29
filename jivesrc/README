@@ -1,0 +1,16 @@
+This tree is the LGPL portion of Jive's TinyMCE source.  Our development
+model is different from the normal TinyMCE model, in that we hack on
+tiny_mce_src.js directly, which is actually a build artifact of the normal
+TinyMCE build process. I don't really recommend this, but it's what we do.
+
+At some point, we'd like to move back to making source changes in the
+classes tree (not least because it would dramatically simplify upstream
+pulls), but adding another build step to our development process isn't
+something we're terribly excited about, so we keep putting it off.
+So it goes.
+
+Apart from various bug fixes to core plugins, Jive's changes include a
+plugin for selection management that makes Firefox's text cursor behave
+in a predictable and user-friendly manner (simplifying various formatting
+operations) and a list plugin that smoothes over most of the bugs in
+various browser's nested list operations.
