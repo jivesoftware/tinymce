@@ -98,8 +98,8 @@ tinymce.create('tinymce.util.Dispatcher', {
 		// Needs to be a real loop since the listener count might change while looping
 		// And this is also more efficient
 		for (i = 0; i<li.length; i++) {
-			c = li[i];
-			s = c.cb.apply(c.scope, a);
+            c = li[i];
+            s = c.cb.apply(c.scope, a);
 
 			if (s === false)
 				break;

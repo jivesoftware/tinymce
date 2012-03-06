@@ -429,7 +429,7 @@
 					n = tmp;
 				}
 				if (li.childNodes.length === 0) {
-					li.innerHTML = '<br _mce_bogus="1" />';
+					li.innerHTML = '<br data-mce-bogus="1" />';
 				}
 				makeList(li);
 			}
@@ -465,7 +465,7 @@
 				var trailingContentSelected = false;
 				each(dom.select(breakElements, element), function(br) {
 					var b;
-					if (br.hasAttribute && br.hasAttribute('_mce_bogus')) {
+					if (br.hasAttribute && br.hasAttribute('data-mce-bogus')) {
 						return true; // Skip the bogus Brs that are put in to appease Firefox and Safari.
 					}
 					if (isAnyPartSelected(startSection, br)) {
@@ -478,7 +478,7 @@
 				each(dom.select(breakElements, element), function(br) {
 					// Got a section from start to br.
 					var tmp = nextLeaf(br);
-					if (br.hasAttribute && br.hasAttribute('_mce_bogus')) {
+					if (br.hasAttribute && br.hasAttribute('data-mce-bogus')) {
 						return true; // Skip the bogus Brs that are put in to appease Firefox and Safari.
 					}
 					if (dom.hasClass(br, '_mce_tagged_br')) {

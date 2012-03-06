@@ -33,6 +33,14 @@
 			typing : false,
 
 			/**
+			 * State if the user is currently deleting text or not. This will add a typing operation into one undo
+			 * level instead of one new level for each keystroke.
+			 *
+			 * @field {Boolean} deleting
+			 */
+			deleting : false,
+
+			/**
 			 * This event will fire each time a new undo level is added to the undo manager.
 			 *
 			 * @event onAdd
@@ -118,6 +126,30 @@
 				return level;
 			},
 
+            /**
+             * Make a change that is guaranteed transparent to the undo stack.  If the current undo level
+             * is equal to the current state, then we advance the current undo level to the new state after
+             * the operation (sort of like a git rebase).  Otherwise, we do nothing to the undo stack.  The
+             * operation is performed in either case.
+             * @param cb The operation to perform.
+             * @return cb's return code.
+             */
+            transparentChange : function(cb){
+                var currentContent = getContent(), lastLevel = data[index];
+
+                if(lastLevel && lastLevel.content == currentContent){
+                    if(index > 0 || data.length == 1){
+                        //the current undo point is equal to the current document state.  Run cb and update that undo point to the new state.
+                        var ret = cb();
+                        lastLevel.content = getContent();
+                        lastLevel.bookmark = editor.selection.getBookmark(2, true);
+                        return ret;
+                    }
+                }
+                //fall though; the current undo point is stale, so we can just make changes.
+                return cb();
+            },
+
 			/**
 			 * Undoes the last action.
 			 *
@@ -130,6 +162,7 @@
 				if (self.typing) {
 					self.add();
 					self.typing = false;
+                    self.deleting = false;
 				}
 
 				if (index > 0) {
@@ -174,6 +207,7 @@
 				data = [];
 				index = 0;
 				self.typing = false;
+				self.deleting = false;
 			},
 
 			/**
@@ -183,7 +217,7 @@
 			 * @return {Boolean} true/false if the undo manager has any undo levels.
 			 */
 			hasUndo : function() {
-				return index > 0 || this.typing;
+				return index > 0 || this.typing || this.deleting;
 			},
 
 			/**

@@ -759,7 +759,16 @@
 				 *    }
 				 * });
 				 */
-				'onSetProgressState'
+				'onSetProgressState',
+
+                /**
+                 * Fires when changes are made to text formatting
+                 *
+                 * @event onFormatChange
+                 * @param {Object} format The format that changed
+                 * @param {boolean} added Whether the format was added or removed.
+                 */
+                'onFormatChange'
 			], function(e) {
 				t[e] = new Dispatcher(t);
 			});
@@ -1417,6 +1426,8 @@
 			 * tinyMCE.activeEditor.selection.select(tinyMCE.activeEditor.dom.select('p')[0]);
 			 */
 			t.selection = new tinymce.dom.Selection(t.dom, t.getWin(), t.serializer);
+
+            t.selectionUtil = new tinymce.SelectionUtil(t);
 
 			/**
 			 * Formatter instance.
@@ -2276,7 +2287,11 @@
 			}
 
 			// Browser commands
-			t.getDoc().execCommand(cmd, ui, val);
+            try{
+			    t.getDoc().execCommand(cmd, ui, val);
+            }catch(ex){
+                console.log("browser execCommand failed. cmd: " + cmd, ex);
+            }
 			t.onExecCommand.dispatch(t, cmd, ui, val, a);
 		},
 
@@ -2468,6 +2483,7 @@
 			// Add undo level will trigger onchange event
 			if (!o.no_events) {
 				t.undoManager.typing = false;
+                t.undoManager.deleting = 0;
 				t.undoManager.add();
 			}
 
@@ -2733,7 +2749,7 @@
 				return t.execCallback('urlconverter_callback', u, e, true, n);
 
 			// Don't convert link href since thats the CSS files that gets loaded into the editor also skip local file URLs
-			if (!s.convert_urls || (e && e.nodeName == 'LINK') || u.indexOf('file:') === 0)
+			if (!s.convert_urls || (e && e.nodeName == 'LINK') || !u || u.indexOf('file:') === 0)
 				return u;
 
 			// Convert to relative
@@ -2984,19 +3000,28 @@
 			}
 
 			t.onClick.add(function(ed, e) {
-				e = e.target;
+                e = e.target;
 
-				// Workaround for bug, http://bugs.webkit.org/show_bug.cgi?id=12250
-				// WebKit can't even do simple things like selecting an image
-				// Needs tobe the setBaseAndExtend or it will fail to select floated images
-				if (tinymce.isWebKit && e.nodeName == 'IMG')
-					t.selection.getSel().setBaseAndExtent(e, 0, e, 1);
+                // Workaround for bug, http://bugs.webkit.org/show_bug.cgi?id=12250
+                // WebKit can't even do simple things like selecting an image
+                // Needs to be the setBaseAndExtend or it will fail to select floated images
+                if (tinymce.isWebKit) {
+                    if (e.nodeName == 'IMG') {
+                        var index = dom.nodeIndex(e);
+                        var p = e.parentNode;
+                        t.selection.getSel().setBaseAndExtent(p, index, p, index+1);
+                        t.nodeChanged();
+                    } else if (e.nodeName == 'A' && dom.hasClass(e, 'mceItemAnchor')) {
+                        t.selection.getSel().setBaseAndExtent(e, 0, e, 1);
+                        t.nodeChanged();
+                    }
+                }
 
-				if (e.nodeName == 'A' && dom.hasClass(e, 'mceItemAnchor'))
-					t.selection.select(e);
+                if (e.nodeName == 'A' && dom.hasClass(e, 'mceItemAnchor'))
+                    t.selection.select(e);
 
-				t.nodeChanged();
-			});
+                t.nodeChanged();
+            });
 
 			// Add node change handlers
 			t.onMouseUp.add(t.nodeChanged);
@@ -3046,6 +3071,7 @@
 			if (s.custom_shortcuts) {
 				if (s.custom_undo_redo_keyboard_shortcuts) {
 					t.addShortcut('ctrl+z', t.getLang('undo_desc'), 'Undo');
+                    t.addShortcut('ctrl+shift+z', t.getLang('redo_desc'), 'Redo');
 					t.addShortcut('ctrl+y', t.getLang('redo_desc'), 'Redo');
 				}
 
@@ -3069,7 +3095,7 @@
 						return v;
 
 					each(t.shortcuts, function(o) {
-						if (tinymce.isMac && o.ctrl != e.metaKey)
+						if (tinymce.isMac && o.ctrl != e.metaKey && o.ctrl != e.ctrlKey)
 							return;
 						else if (!tinymce.isMac && o.ctrl != e.ctrlKey)
 							return;
@@ -3168,11 +3194,12 @@
 			if (s.custom_undo_redo) {
 				function addUndo() {
 					t.undoManager.typing = false;
+                    t.undoManager.deleting = false;
 					t.undoManager.add();
 				};
 
 				dom.bind(t.getDoc(), 'focusout', function(e) {
-					if (!t.removed && t.undoManager.typing)
+					if (!t.removed && (t.undoManager.typing || t.undoManager.deleting))
 						addUndo();
 				});
 
@@ -3211,11 +3238,21 @@
 						if (tinymce.isIE && keyCode == 13)
 							t.undoManager.beforeChange();
 
-						if (t.undoManager.typing)
+						if (t.undoManager.typing || t.undoManager.deleting)
 							addUndo();
 
 						return;
 					}
+
+                    //We've started deleting text
+                    if(e.keyCode == 8 || e.keyCode == 46) {
+                        //backspace or delete
+                        if(!t.undoManager.deleting){
+                            addUndo();
+                            t.undoManager.deleting = true;
+                        }
+                        return;
+                    }
 
 					// If key isn't shift,ctrl,alt,capslock,metakey
 					if ((keyCode < 16 || keyCode > 20) && keyCode != 224 && keyCode != 91 && !t.undoManager.typing) {
@@ -3226,7 +3263,7 @@
 				});
 
 				t.onMouseDown.add(function() {
-					if (t.undoManager.typing)
+					if (t.undoManager.typing || t.undoManager.deleting)
 						addUndo();
 				});
 			}

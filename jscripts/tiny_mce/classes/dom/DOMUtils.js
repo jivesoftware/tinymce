@@ -18,6 +18,10 @@
 		simpleSelectorRe = /^([a-z0-9],?)+$/i,
 		blockElementsMap = tinymce.html.Schema.blockElementsMap,
 		whiteSpaceRegExp = /^[ \t\r\n]*$/;
+    // See UIUX-1018
+    var selfClosingTags = /base|basefont|frame|link|meta|area|br|col|hr|img|input|param/i;
+
+    var extractRangeContents = null; //for split.  Workaround for buggy extractContents implementation in IE9
 
 	/**
 	 * Utility class for various DOM manipulation and retrival functions.
@@ -68,7 +72,7 @@
 			t.counter = 0;
 			t.stdMode = !tinymce.isIE || d.documentMode >= 8;
 			t.boxModel = !tinymce.isIE || d.compatMode == "CSS1Compat" || t.stdMode;
-			t.hasOuterHTML = "outerHTML" in d.createElement("a");
+			t.hasOuterHTML = "outerHTML" in document.createElement("a");
 
 			t.settings = s = tinymce.extend({
 				keep_values : false,
@@ -134,6 +138,8 @@
 
 			w = !w ? this.win : w;
 			d = w.document;
+            if(d == null) return {x : 0, y : 0, w : 1, h : 1};
+
 			b = this.boxModel ? d.documentElement : d.body;
 
 			// Returns viewport size excluding scrollbars
@@ -442,7 +448,14 @@
 			if (typeof(h) != "undefined")
 				return o + '>' + h + '</' + n + '>';
 
-			return o + ' />';
+            // Certain tags will not behave correctly in certain browsers, such
+            // as IE8, if they are self-closed.  This check was added as a fix
+            // for UIUX-1018.
+            if (n.match(selfClosingTags)) {
+			    return o + ' />';
+            } else {
+                return o + '></' + n + '>';
+            }
 		},
 
 		/**
@@ -553,7 +566,7 @@
 			n = this.get(n);
 
 			if (!n)
-				return;
+				return false;
 
 			// Gecko
 			if (this.doc.defaultView && c) {
@@ -571,6 +584,7 @@
 			}
 
 			// Camelcase it, if needed
+            if(typeof(na) == "undefined") return false;
 			na = na.replace(/-(\D)/g, function(a, b){
 				return b.toUpperCase();
 			});
@@ -748,11 +762,12 @@
 				dv = '';
 
 			// Try the mce variant for these
-			if (/^(src|href|style|coords|shape)$/.test(n)) {
+			if (/^(?:src|href|style|coords|shape)$/.test(n)) {
 				v = e.getAttribute("data-mce-" + n);
 
-				if (v)
+				if (v){
 					return v;
+                }
 			}
 
 			if (isIE && t.props[n]) {
@@ -764,7 +779,7 @@
 				v = e.getAttribute(n, 2);
 
 			// Check boolean attribs
-			if (/^(checked|compact|declare|defer|disabled|ismap|multiple|nohref|noshade|nowrap|readonly|selected)$/.test(n)) {
+			if (/^(?:checked|compact|declare|defer|disabled|ismap|multiple|nohref|noshade|nowrap|readonly|selected)$/.test(n)) {
 				if (e[t.props[n]] === true && v === '')
 					return n;
 
@@ -789,6 +804,9 @@
 			// Remove Apple and WebKit stuff
 			if (isWebKit && n === "class" && v)
 				v = v.replace(/(apple|webkit)\-[a-z\-]+/gi, '');
+
+            // JIVE-5079
+            if(v == null) v = "";
 
 			// Handle IE issues
 			if (isIE) {
@@ -1121,8 +1139,8 @@
 		 * URLs will get converted, hex color values fixed etc. Check processHTML for details.
 		 *
 		 * @method setHTML
-		 * @param {Element/String/Array} e DOM element, element id string or array of elements/ids to set HTML inside.
-		 * @param {String} h HTML content to set as inner HTML of the element.
+		 * @param {Element/String/Array} element DOM element, element id string or array of elements/ids to set HTML inside.
+		 * @param {String} html HTML content to set as inner HTML of the element.
 		 * @example
 		 * // Sets the inner HTML of all paragraphs in the active editor
 		 * tinyMCE.activeEditor.dom.setHTML(tinyMCE.activeEditor.dom.select('p'), 'some inner html');
@@ -1130,41 +1148,240 @@
 		 * // Sets the inner HTML of a element by id in the document
 		 * tinyMCE.DOM.setHTML('mydiv', 'some inner html');
 		 */
-		setHTML : function(element, html) {
-			var self = this;
+        setHTML : function(element, html) {
+            var self = this;
 
-			return self.run(element, function(element) {
-				if (isIE) {
-					// Remove all child nodes, IE keeps empty text nodes in DOM
-					while (element.firstChild)
-						element.removeChild(element.firstChild);
+            return this.run(element, function(e) {
+                var x, i, nl, n, p, x;
 
-					try {
-						// IE will remove comments from the beginning
-						// unless you padd the contents with something
-						element.innerHTML = '<br />' + html;
-						element.removeChild(element.firstChild);
-					} catch (ex) {
-						// IE sometimes produces an unknown runtime error on innerHTML if it's an block element within a block element for example a div inside a p
-						// This seems to fix this problem
+                html = self.processHTML(html);
 
-						// Create new div with HTML contents and a BR infront to keep comments
-						element = self.create('div');
-						element.innerHTML = '<br />' + html;
+                if (isIE) {
+                    function doSet() {
+                        // Remove all child nodes
+                        while (e.firstChild)
+                            e.firstChild.removeNode();
 
-						// Add all children from div to target
-						each (element.childNodes, function(node, i) {
-							// Skip br element
-							if (i)
-								element.appendChild(node);
-						});
-					}
-				} else
-					element.innerHTML = html;
+                        try {
+                            // IE will remove comments from the beginning
+                            // unless you padd the contents with something
+                            e.innerHTML = '<br />' + html;
+                            e.removeChild(e.firstChild);
+                        } catch (ex) {
+                            // IE sometimes produces an unknown runtime error on innerHTML if it's an block element within a block element for example a div inside a p
+                            // This seems to fix this problem
 
-				return html;
-			});
-		},
+                            // Create new div with HTML contents and a BR infront to keep comments
+                            x = self.create('div');
+                            x.innerHTML = '<br />' + html;
+
+                            // Add all children from div to target
+                            each (x.childNodes, function(n, i) {
+                                // Skip br element
+                                if (i)
+                                    e.appendChild(n);
+                            });
+                        }
+                    }
+
+                    // IE has a serious bug when it comes to paragraphs it can produce an invalid
+                    // DOM tree if contents like this <p><ul><li>Item 1</li></ul></p> is inserted
+                    // It seems to be that IE doesn't like a root block element placed inside another root block element
+                    if (self.settings.fix_ie_paragraphs)
+                        html = html.replace(/<p><\/p>|<p([^>]+)><\/p>|<p[^\/+]\/>/gi, '<p$1 _mce_keep="true">&nbsp;</p>');
+
+                    doSet();
+
+                    if (self.settings.fix_ie_paragraphs) {
+                        // Check for odd paragraphs this is a sign of a broken DOM
+                        nl = e.getElementsByTagName("p");
+                        for (i = nl.length - 1, x = 0; i >= 0; i--) {
+                            n = nl[i];
+
+                            if (!n.hasChildNodes()) {
+                                if (!n._mce_keep) {
+                                    x = 1; // Is broken
+                                    break;
+                                }
+
+                                n.removeAttribute('_mce_keep');
+                            }
+                        }
+                    }
+
+                    // Time to fix the madness IE left us
+                    if (x) {
+                        // So if we replace the p elements with divs and mark them and then replace them back to paragraphs
+                        // after we use innerHTML we can fix the DOM tree
+                        html = html.replace(/<p ([^>]+)>|<p>/ig, '<div $1 _mce_tmp="1">');
+                        html = html.replace(/<\/p>/gi, '</div>');
+
+                        // Set the new HTML with DIVs
+                        doSet();
+
+                        // Replace all DIV elements with the _mce_tmp attibute back to paragraphs
+                        // This is needed since IE has a annoying bug see above for details
+                        // This is a slow process but it has to be done. :(
+                        if (self.settings.fix_ie_paragraphs) {
+                            nl = e.getElementsByTagName("DIV");
+                            for (i = nl.length - 1; i >= 0; i--) {
+                                n = nl[i];
+
+                                // Is it a temp div
+                                if (n._mce_tmp) {
+                                    // Create new paragraph
+                                    p = self.doc.createElement('p');
+
+                                    // Copy all attributes
+                                    n.cloneNode(false).outerHTML.replace(/([a-z0-9\-_]+)=/gi, function(a, b) {
+                                        var v;
+
+                                        if (b !== '_mce_tmp') {
+                                            v = n.getAttribute(b);
+
+                                            if (!v && b === 'class')
+                                                v = n.className;
+
+                                            p.setAttribute(b, v);
+                                        }
+                                    });
+
+                                    // Append all children to new paragraph
+                                    for (x = 0; x<n.childNodes.length; x++)
+                                        p.appendChild(n.childNodes[x].cloneNode(true));
+
+                                    // Replace div with new paragraph
+                                    n.swapNode(p);
+                                }
+                            }
+                        }
+                    }
+                } else
+                    e.innerHTML = html;
+
+                return html;
+            });
+        },
+
+        processHTML : function(h) {
+            var t = this, s = t.settings, codeBlocks = [];
+
+            if (!s.process_html)
+                return h;
+
+            if (isIE) {
+                h = h.replace(/&apos;/g, '&#39;'); // IE can't handle apos
+                h = h.replace(/\s+(disabled|checked|readonly|selected)\s*=\s*[\"\']?(false|0)[\"\']?/gi, ''); // IE doesn't handle default values correct
+            }
+
+            // Force tags open, and on IE9 replace $1$2 that got left behind due to bugs in their RegExp engine
+            h = tinymce._replace(/<a( )([^>]+)\/>|<a\/>/gi, '<a$1$2></a>', h); // Force open
+
+            // Store away src and href in data-mce-src and mce_href since browsers mess them up
+            if (s.keep_values) {
+                // Wrap scripts and styles in comments for serialization purposes
+                if (/<script|noscript|style/i.test(h)) {
+                    function trim(s) {
+                        // Remove prefix and suffix code for element
+                        s = s.replace(/(<!--\[CDATA\[|\]\]-->)/g, '\n');
+                        s = s.replace(/^[\r\n]*|[\r\n]*$/g, '');
+                        s = s.replace(/^\s*(\/\/\s*<!--|\/\/\s*<!\[CDATA\[|<!--|<!\[CDATA\[)[\r\n]*/g, '');
+                        s = s.replace(/\s*(\/\/\s*\]\]>|\/\/\s*-->|\]\]>|-->|\]\]-->)\s*$/g, '');
+
+                        return s;
+                    };
+
+                    // Wrap the script contents in CDATA and keep them from executing
+                    h = h.replace(/<script([^>]+|)>([\s\S]*?)<\/script>/gi, function(v, attribs, text) {
+                        // Force type attribute
+                        if (!attribs)
+                            attribs = ' type="text/javascript"';
+
+                        // Convert the src attribute of the scripts
+                        attribs = attribs.replace(/src=\"([^\"]+)\"?/i, function(a, url) {
+                            if (s.url_converter)
+                                url = t.encode(s.url_converter.call(s.url_converter_scope || t, t.decode(url), 'src', 'script'));
+
+                            return 'data-mce-src="' + url + '"';
+                        });
+
+                        // Wrap text contents
+                        if (tinymce.trim(text)) {
+                            codeBlocks.push(trim(text));
+                            text = '<!--\nMCE_SCRIPT:' + (codeBlocks.length - 1) + '\n// -->';
+                        }
+
+                        return '<mce:script' + attribs + '>' + text + '</mce:script>';
+                    });
+
+                    // Wrap style elements
+                    h = h.replace(/<style([^>]+|)>([\s\S]*?)<\/style>/gi, function(v, attribs, text) {
+                        // Wrap text contents
+                        if (text) {
+                            codeBlocks.push(trim(text));
+                            text = '<!--\nMCE_SCRIPT:' + (codeBlocks.length - 1) + '\n-->';
+                        }
+
+                        return '<mce:style' + attribs + '>' + text + '</mce:style><style ' + attribs + ' data-mce-bogus="1">' + text + '</style>';
+                    });
+
+                    // Wrap noscript elements
+                    h = h.replace(/<noscript([^>]+|)>([\s\S]*?)<\/noscript>/g, function(v, attribs, text) {
+                        return '<mce:noscript' + attribs + '><!--' + t.encode(text).replace(/--/g, '&#45;&#45;') + '--></mce:noscript>';
+                    });
+                }
+
+                h = tinymce._replace(/<!\[CDATA\[([\s\S]+)\]\]>/g, '<!--[CDATA[$1]]-->', h);
+
+                // This function processes the attributes in the HTML string to force boolean
+                // attributes to the attr="attr" format and convert style, src and href to data-mce- versions
+                function processTags(html) {
+                    return html.replace(tagRegExp, function(match, elm_name, attrs, end) {
+                        return '<' + elm_name + attrs.replace(attrRegExp, function(match, name, value, val2, val3) {
+                            var mceValue;
+
+                            name = name.toLowerCase();
+                            value = value || val2 || val3 || "";
+
+                            // Treat boolean attributes
+                            if (boolAttrs[name]) {
+                                // false or 0 is treated as a missing attribute
+                                if (value === 'false' || value === '0')
+                                    return;
+
+                                return name + '="' + name + '"';
+                            }
+
+                            // Is attribute one that needs special treatment
+                            if (mceAttribs[name] && attrs.indexOf('data-mce-' + name) == -1) {
+                                mceValue = t.decode(value);
+
+                                // Convert URLs to relative/absolute ones
+                                if (s.url_converter && (name == "src" || name == "href"))
+                                    mceValue = s.url_converter.call(s.url_converter_scope || t, mceValue, name, elm_name);
+
+                                // Process styles lowercases them and compresses them
+                                if (name == 'style')
+                                    mceValue = t.serializeStyle(t.parseStyle(mceValue), name);
+
+                                return name + '="' + value + '"' + ' data-mce-' + name + '="' + t.encode(mceValue) + '"';
+                            }
+
+                            return match;
+                        }) + end + '>';
+                    });
+                };
+
+                h = processTags(h);
+
+                // Restore script blocks
+                h = h.replace(/MCE_SCRIPT:([0-9]+)/g, function(val, idx) {
+                    return codeBlocks[idx];
+                });
+            }
+
+            return h;
+        },
 
 		/**
 		 * Returns the outer HTML of an element.
@@ -1720,7 +1937,7 @@
 							node.parentNode.insertBefore(children[0], node);
 
 						// Keep non empty elements or img, hr etc
-						if (children.length || /^(br|hr|input|img)$/i.test(node.nodeName))
+						if (children.length || /^(?:br|hr|input|img|li|td|th)$/i.test(node.nodeName))
 							return;
 					}
 
@@ -1731,16 +1948,34 @@
 			};
 
 			if (pe && e) {
+                //Work around a possible issue with the browser's built-in extractContents
+                extractRangeContents = extractRangeContents || (function() {
+                    if (tinymce.isIE9) {
+                        return function fakeExtract(rng) {
+                            var fakeRng = new tinymce.dom.Range(t);
+                            fakeRng.setStart(rng.startContainer, rng.startOffset);
+                            fakeRng.setEnd(rng.endContainer, rng.endOffset);
+                            var ret = fakeRng.extractContents();
+                            rng.setStart(fakeRng.startContainer, fakeRng.startOffset);
+                            rng.setEnd(fakeRng.endContainer, fakeRng.endOffset);
+                            return ret;
+                        };
+                    }
+                    return function realExtract(rng) {
+                        return rng.extractContents();
+                    };
+                })();
+
 				// Get before chunk
 				r.setStart(pe.parentNode, t.nodeIndex(pe));
 				r.setEnd(e.parentNode, t.nodeIndex(e));
-				bef = r.extractContents();
+                bef = extractRangeContents(r);
 
 				// Get after chunk
 				r = t.createRng();
 				r.setStart(e.parentNode, t.nodeIndex(e) + 1);
 				r.setEnd(pe.parentNode, t.nodeIndex(pe) + 1);
-				aft = r.extractContents();
+                aft = extractRangeContents(r);
 
 				// Insert before chunk
 				pa = pe.parentNode;
@@ -1748,7 +1983,7 @@
 
 				// Insert middle chunk
 				if (re)
-					pa.replaceChild(re, e);
+                    pa.insertBefore(re, pe);
 				else
 					pa.insertBefore(e, pe);
 

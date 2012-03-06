@@ -287,7 +287,7 @@ tinyMCEPopup = {
 
 		// To avoid domain relaxing issue in Opera
 		function close() {
-			t.editor.windowManager.close(window);
+			t.editor.windowManager.close(window, t.id);
 			tinymce = tinyMCE = t.editor = t.params = t.dom = t.dom.doc = null; // Cleanup
 		};
 

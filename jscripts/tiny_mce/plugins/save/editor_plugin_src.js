@@ -73,8 +73,7 @@
 			if (formObj) {
 				ed.isNotDirty = true;
 
-				if (formObj.onsubmit == null || formObj.onsubmit() != false)
-					formObj.submit();
+                $j(formObj).submit();
 
 				ed.nodeChanged();
 			} else

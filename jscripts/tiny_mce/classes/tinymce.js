@@ -9,7 +9,8 @@
  */
 
 (function(win) {
-	var whiteSpaceRe = /^\s*|\s*$/g,
+    var whiteSpaceRe = /^\s+|\s+$/g,
+        nativeTrim = String.prototype.trim,
 		undefined, isRegExpBroken = 'B'.replace(/A(.)|B/, '$1') === '$1';
 
 	/**
@@ -313,7 +314,7 @@
 			} else {
 				// Hashtables
 				for (n in o) {
-					if (o.hasOwnProperty(n)) {
+                    if (Object.prototype.hasOwnProperty.call(o, n)) {  //IE doesn't give certain DOM objects a hasOwnProperty method
 						if (cb.call(s, o[n], n, o) === false)
 							return 0;
 					}
@@ -432,9 +433,13 @@
 		 * @param {String} s String to remove whitespace from.
 		 * @return {String} New string with removed whitespace.
 		 */
-		trim : function(s) {
-			return (s ? '' + s : '').replace(whiteSpaceRe, '');
-		},
+        //If present, use the native trim, as it's much faster.
+		trim : nativeTrim ? function trim(s) {
+            return s ? nativeTrim.call(s + '') : '';
+        }:
+        function trim(s) {
+            return (s ? '' + s : '').replace(whiteSpaceRe, '');
+        },
 
 		/**
 		 * Creates a class, subclass or static singleton.

@@ -29,6 +29,10 @@
 			t.editor = ed;
 			t.rpcUrl = ed.getParam("spellchecker_rpc_url", "{backend}");
 
+            ed.onBeginSpelling = new tinymce.util.Dispatcher(ed);
+            ed.onEndSpelling = new tinymce.util.Dispatcher(ed);
+            ed.onSpellCheckFinished = new tinymce.util.Dispatcher(ed);
+
 			if (t.rpcUrl == '{backend}') {
 				// Sniff if the browser supports native spellchecking (Don't know of a better way)
 				if (tinymce.isIE)
@@ -52,6 +56,7 @@
 				}
 
 				if (!t.active) {
+                    ed.onBeginSpelling.dispatch();
 					ed.setProgressState(1);
 					t._sendRPC('checkWords', [t.selectedLang, t._getWords()], function(r) {
 						if (r.length > 0) {
@@ -59,23 +64,29 @@
 							t._markWords(r);
 							ed.setProgressState(0);
 							ed.nodeChanged();
+                            ed.onSpellCheckFinished.dispatch();
 						} else {
 							ed.setProgressState(0);
 
 							if (ed.getParam('spellchecker_report_no_misspellings', true))
 								ed.windowManager.alert('spellchecker.no_mpell');
+                            ed.onEndSpelling.dispatch();
 						}
 					});
 				} else
 					t._done();
 			});
 
-			if (ed.settings.content_css !== false)
-				ed.contentCSS.push(url + '/css/content.css');
+            ed.onInit.add(function() {
+                if (ed.settings.content_css !== false)
+                    ed.dom.loadCSS(window.CS_RESOURCE_BASE_URL + "/styles/tiny_mce3/plugins/spellchecker/css/content.css");
+            });
 
 			ed.onClick.add(t._showMenu, t);
-			ed.onContextMenu.add(t._showMenu, t);
-			ed.onBeforeGetContent.add(function() {
+            if (ed && ed.plugins.contextmenu) {
+			    ed.onContextMenu.add(t._showMenu, t);
+            }
+            ed.onBeforeGetContent.add(function() {
 				if (t.active)
 					t._removeWords();
 			});
@@ -167,7 +178,7 @@
 		},
 
 		_getSeparators : function() {
-			var re = '', i, str = this.editor.getParam('spellchecker_word_separator_chars', '\\s!"#$%&()*+,-./:;<=>?@[\]^_{|}§©«®±¶·¸»¼½¾¿×÷¤\u201d\u201c');
+			var re = '', i, str = this.editor.getParam('spellchecker_word_separator_chars', '\\s!"#$%&()*+,-./:;<=>?@[\]^_{|}ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½\u201d\u201c');
 
 			// Build word separator regexp
 			for (i=0; i<str.length; i++)
@@ -176,28 +187,41 @@
 			return re;
 		},
 
-		_getWords : function() {
-			var ed = this.editor, wl = [], tx = '', lo = {}, rawWords = [];
+        _cleanBody : function() {
+            var ed = this.editor, wl = [], tx = '', lo = {}, dom = ed.dom;
+
+			// collapse adjacent text nodes
+			this._walk(ed.getBody(), function(n) {
+				while($def(n) && n.nodeType == 3 && n.nextSibling && n.nextSibling.nodeType == 3){
+                    n.nodeValue = n.nodeValue + n.nextSibling.nodeValue;
+                    n.nextSibling.parentNode.removeChild(n.nextSibling);
+                }
+            });
+        },
+
+        _getWords : function() {
+			var ed = this.editor, wl = [], tx = '', lo = {}, dom = ed.dom;
+            var jivemacros = ed.plugins.jivemacros;
 
 			// Get area text
 			this._walk(ed.getBody(), function(n) {
-				if (n.nodeType == 3)
-					tx += n.nodeValue + ' ';
-			});
+				if (n.nodeType == 3) {
+                    var span = dom.getParent(n, "span");
+                    var pre = dom.getParent(n, "pre");
+                    //we ignore the contents of macros, except for quote macros
+                    if (!(span != null && jivemacros.isMacro(span)
+                            || pre != null && jivemacros.isMacro(pre) && jivemacros.getMacroFor(pre).getName() != "quote")){
+                        tx += n.nodeValue + ' ';
+                    }
+                }
+            });
 
-			// split the text up into individual words
-			if (ed.getParam('spellchecker_word_pattern')) {
-				// look for words that match the pattern
-				rawWords = tx.match('(' + ed.getParam('spellchecker_word_pattern') + ')', 'gi');
-			} else {
-				// Split words by separator
-				tx = tx.replace(new RegExp('([0-9]|[' + this._getSeparators() + '])', 'g'), ' ');
-				tx = tinymce.trim(tx.replace(/(\s+)/g, ' '));
-				rawWords = tx.split(' ');
-			}
+			// Split words by separator
+			tx = tx.replace(new RegExp('([0-9]|[' + this._getSeparators() + '])', 'g'), ' ');
+			tx = tinymce.trim(tx.replace(/(\s+)/g, ' '));
 
 			// Build word array and remove duplicates
-			each(rawWords, function(v) {
+			each(tx.split(' '), function(v) {
 				if (!lo[v]) {
 					wl.push(v);
 					lo[v] = 1;
@@ -220,67 +244,44 @@
 			se.moveToBookmark(b);
 		},
 
-		_markWords : function(wl) {
-			var ed = this.editor, dom = ed.dom, doc = ed.getDoc(), se = ed.selection, b = se.getBookmark(), nl = [],
-				w = wl.join('|'), re = this._getSeparators(), rx = new RegExp('(^|[' + re + '])(' + w + ')(?=[' + re + ']|$)', 'g');
+        _markWords : function(wl) {
+            var ed = this.editor, separatorChars = this._getSeparators(), dom = ed.dom, textNodes = [];
+            var se = ed.selection, b = se.getBookmark(BOOKMARKTYPE);
+            var jivemacros = ed.plugins.jivemacros;
 
-			// Collect all text nodes
-			this._walk(ed.getBody(), function(n) {
-				if (n.nodeType == 3) {
-					nl.push(n);
-				}
-			});
+            var wordsToMarkExp = wl.join("|");
 
-			// Wrap incorrect words in spans
-			each(nl, function(n) {
-				var node, elem, txt, pos, v = n.nodeValue;
+            //a word to mark either begins the string, or is preceeded by a separator char. Then it's followed by a separator char or the end of the string (but we don't including the following bit in the match).
+            var testRe = new RegExp('(^|[' + separatorChars + '])(' + wordsToMarkExp + ')(?=[' + separatorChars + ']|$)', 'g');
 
-				if (rx.test(v)) {
-					// Encode the content
-					v = dom.encode(v);
-					// Create container element
-					elem = dom.create('span', {'class' : 'mceItemHidden'});
+            // Collect all text nodes
+            this._walk(this.editor.getBody(), function(n) {
+                if (n.nodeType == 3) {
+                    textNodes.push(n);
+                }
+            });
 
-					// Following code fixes IE issues by creating text nodes
-					// using DOM methods instead of innerHTML.
-					// Bug #3124: <PRE> elements content is broken after spellchecking.
-					// Bug #1408: Preceding whitespace characters are removed
-					// @TODO: I'm not sure that both are still issues on IE9.
-					if (tinymce.isIE) {
-						// Enclose mispelled words with temporal tag
-						v = v.replace(rx, '$1<mcespell>$2</mcespell>');
-						// Loop over the content finding mispelled words
-						while ((pos = v.indexOf('<mcespell>')) != -1) {
-							// Add text node for the content before the word
-							txt = v.substring(0, pos);
-							if (txt.length) {
-								node = doc.createTextNode(dom.decode(txt));
-								elem.appendChild(node);
-							}
-							v = v.substring(pos+10);
-							pos = v.indexOf('</mcespell>');
-							txt = v.substring(0, pos);
-							v = v.substring(pos+11);
-							// Add span element for the word
-							elem.appendChild(dom.create('span', {'class' : 'mceItemHiddenSpellWord'}, txt));
-						}
-						// Add text node for the rest of the content
-						if (v.length) {
-							node = doc.createTextNode(dom.decode(v));
-							elem.appendChild(node);
-						}
-					} else {
-						// Other browsers preserve whitespace characters on innerHTML usage
-						elem.innerHTML = v.replace(rx, '$1<span class="mceItemHiddenSpellWord">$2</span>');
-					}
+            // Wrap incorrect words in spans
+            each(textNodes, function(n) {
+                var span = dom.getParent(n, "span");
+                var pre = dom.getParent(n, "pre");
+                //we ignore the contents of macros, except for quote macros
+                if (!(span != null && jivemacros.isMacro(span)
+                        || pre != null && jivemacros.isMacro(pre) && jivemacros.getMacroFor(pre).getName() != "quote")){
+                    var v = n.nodeValue;
 
-					// Finally, replace the node with the container
-					dom.replace(elem, n);
-				}
-			});
+                    testRe.lastIndex = 0;
+                    if (testRe.test(v)) {
+                        v = dom.encode(v);
+                        v = v.replace(testRe, '$1<span class="mceItemHiddenSpellWord">$2</span>');
 
-			se.moveToBookmark(b);
-		},
+                        dom.replace(dom.create('span', {'class' : 'mceItemHidden'}, v), n);
+                    }
+                }
+            });
+
+            se.moveToBookmark(b);
+        },
 
 		_showMenu : function(ed, e) {
 			var t = this, ed = t.editor, m = t._menu, p1, dom = ed.dom, vp = dom.getViewPort(ed.getWin()), wordSpan = e.target;
@@ -402,6 +403,7 @@
 			var t = this, la = t.active;
 
 			if (t.active) {
+                t.editor.onEndSpelling.dispatch();
 				t.active = 0;
 				t._removeWords();
 

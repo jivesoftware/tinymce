@@ -127,6 +127,7 @@
 	include('WindowManager.js');
 	include('Formatter.js');
 	include('LegacyInput.js');
+	include('SelectionUtil.js');
 
 	load();
 }());

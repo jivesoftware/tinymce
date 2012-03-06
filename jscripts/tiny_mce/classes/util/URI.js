@@ -35,7 +35,7 @@
 
 			// Strange app protocol that isn't http/https or local anchor
 			// For example: mailto,skype,tel etc.
-			if (/^([\w\-]+):([^\/]{2})/i.test(u) || /^\s*#/.test(u)) {
+			if (/^([\w\-\+]+):(?!\/{2})/i.test(u) || /^\s*#/.test(u)) {
 				t.source = u;
 				return;
 			}
@@ -296,6 +296,8 @@
 
 				if (t.path)
 					s += t.path;
+                else
+                    s += '/';
 
 				if (t.query)
 					s += '?' + t.query;

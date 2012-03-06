@@ -12,6 +12,7 @@
 	// Shorten names
 	var Event = tinymce.dom.Event,
 		isIE = tinymce.isIE,
+		isIE9 = tinymce.isIE9,
 		isGecko = tinymce.isGecko,
 		isOpera = tinymce.isOpera,
 		each = tinymce.each,
@@ -38,7 +39,7 @@
 
 		if (clone)
 			return {wrapper : clone, inner : inner};
-	};
+	}
 
 	// Checks if the selection/caret is at the end of the specified block element
 	function isAtEnd(rng, par) {
@@ -47,28 +48,20 @@
 		rng2.setStart(rng.endContainer, rng.endOffset);
 		rng2.setEndAfter(par);
 
+        var remainder = rng.toString().replace(/\ufeff/g, "");  //strip off byte order marks, which often occur in IE9
+
 		// Get number of characters to the right of the cursor if it's zero then we are at the end and need to merge the next block element
-		return rng2.cloneContents().textContent.length == 0;
-	};
+		return remainder.length == 0;
+	}
 
-	function splitList(selection, dom, li) {
-		var listBlock, block;
-
-		if (dom.isEmpty(li)) {
-			listBlock = dom.getParent(li, 'ul,ol');
-
-			if (!dom.getParent(listBlock.parentNode, 'ul,ol')) {
-				dom.split(listBlock, li);
-				block = dom.create('p', 0, '<br data-mce-bogus="1" />');
-				dom.replace(block, li);
-				selection.select(block, 1);
-			}
-
-			return FALSE;
-		}
-
-		return TRUE;
-	};
+    function createMozBR(){
+        var dom = tinymce.activeEditor.dom;
+        return dom.create("br", {
+            "_moz_dirty": "",
+            "type": "_moz",
+            "data-mce-bogus": "1"
+        });
+    }
 
 	/**
 	 * This is a internal class and no method in this class should be called directly form the out side.
@@ -175,7 +168,7 @@
 
 			if (s.force_br_newlines) {
 				// Force IE to produce BRs on enter
-				if (isIE) {
+                if (isIE && !isIE9) {
 					ed.onKeyPress.add(function(ed, e) {
 						var n;
 
@@ -192,7 +185,7 @@
 			}
 
 			if (s.force_p_newlines) {
-				if (!isIE) {
+                if (!isIE || isIE9) {
 					ed.onKeyPress.add(function(ed, e) {
 						if (e.keyCode == 13 && !e.shiftKey && !t.insertPara(e))
 							Event.cancel(e);
@@ -323,16 +316,29 @@
 			return d.getParent(n, d.isBlock);
 		},
 
+        /**
+         * A "block container" is an element that commonly contains block nodes.  P tags aren't block containers, but
+         * LI, TD, PRE and BODY are.
+         *
+         * @param n
+         */
+        getClosestBlockContainer: function(n){
+            return tinymce.activeEditor.dom.getParent(n, "li, td, th, pre, body");
+        },
+
+        /**
+         * This method is the general handler for pressing enter in TinyMCE. It attempts to handle all the necessary
+         * contexts, preserve formatting correctly when creating new paragraphs, and generally make it all work.
+         *
+         * @param e The keypress event.  Currently unused.
+         */
 		insertPara : function(e) {
-			var t = this, ed = t.editor, dom = ed.dom, d = ed.getDoc(), se = ed.settings, s = ed.selection.getSel(), r = s.getRangeAt(0), b = d.body;
+			var t = this, ed = t.editor, dom = ed.dom, d = ed.getDoc(), se = ed.settings, s = ed.selection.getSel(), r = ed.selection.getRng(true), b = d.body;
 			var rb, ra, dir, sn, so, en, eo, sb, eb, bn, bef, aft, sc, ec, n, vp = dom.getViewPort(ed.getWin()), y, ch, car;
 
 			ed.undoManager.beforeChange();
 
-			// If root blocks are forced then use Operas default behavior since it's really good
-// Removed due to bug: #1853816
-//			if (se.forced_root_block && isOpera)
-//				return TRUE;
+            ed.selectionUtil.adjustForAnchorEdges(r);
 
 			// Setup before range
 			rb = d.createRange();
@@ -406,13 +412,67 @@
 			eb = t.getParentBlock(en);
 			bn = sb ? sb.nodeName : se.element; // Get block name to create
 
-			// Return inside list use default browser behavior
-			if (n = t.dom.getParent(sb, 'li,pre')) {
-				if (n.nodeName == 'LI')
-					return splitList(ed.selection, t.dom, n);
+			// Don't use default browser behavior for lists; it often fails.
+            var blockContainer = t.getClosestBlockContainer(sn);
+            if(blockContainer.nodeName.toLowerCase() == 'li'){
+                var li = blockContainer;
+                if(dom.isEmpty(li) &&
+                        li.nextSibling == null){
+                    //enter in empty li, outdent
+                    ed.execCommand("mceOutdent");
+                    return false;
+                }else if((tinymce.isGecko || tinymce.isIE9) && ed.selectionUtil.atEndOf(li)){
+                    //enter at the end of non-empty li
 
-				return TRUE;
-			}
+                    //get current format element heirarchy
+                    var formatElems = [];
+                    n = sn;
+                    while(n != li){
+                        if(n.nodeType == 1 && !ed.dom.isBlock(n)){
+                            formatElems.push(n);
+                        }
+                        n = n.parentNode;
+                    }
+
+                    //create a new nextSibling li, and copy formats
+                    var newLi = ed.dom.create("li");
+                    li.parentNode.insertBefore(newLi, li.nextSibling);
+                    n = newLi;
+                    while(formatElems.length){
+                        var newElem = formatElems.pop().cloneNode(false);
+                        n.appendChild(newElem);
+                        n = newElem;
+                    }
+                    if(tinymce.isGecko){
+                        newLi.appendChild(createMozBR());
+                    }
+
+                    //position cursor
+                    var rng = ed.dom.createRng();
+                    rng.setStart(n, 0);
+                    rng.collapse(true);
+                    ed.selection.setRng(rng);
+
+                    tinymce.dom.Event.cancel(e);
+                    return false;
+                }
+            }else if(tinymce.isWebKit && blockContainer.nodeName.toLowerCase() == 'pre' && ed.dom.getParent(sn, "p, pre") == blockContainer){
+                //there's no P between us and the PRE
+
+                //In WebKit, enter in a PRE will break the PRE, but what we want is a new P within the PRE.
+                //That works fine for enter in a P in a PRE, so create that situation.  Also, the
+                //resulting DOM structure is more elegant than just tacking a new P after the text node
+                //we're in, since the direct children of the PRE will all be P tags.
+
+                //the selection's deepest block container is the PRE tag. Wrap the PRE's contents in a P.
+                var bm = ed.selection.getBookmark();
+                var r2 = ed.dom.createRng();
+                r2.selectNodeContents(blockContainer);
+                var p = ed.dom.create('p');
+                r2.surroundContents(p);
+                ed.selection.moveToBookmark(bm);
+                return true;
+            }
 
 			// If caption or absolute layers then always generate new blocks within
 			if (sb && (sb.nodeName == 'CAPTION' || /absolute|relative|fixed/gi.test(dom.getStyle(sb, 'position', 1)))) {
@@ -468,6 +528,7 @@
 				rb.setStartBefore(sc);
 
 			rb.setEnd(sn, so);
+            ed.selectionUtil.adjustForAnchorEdges(rb);
 			bef.appendChild(rb.cloneContents() || d.createTextNode('')); // Empty text node needed for Safari
 
 			// Place secnd chop part within new block element
@@ -478,6 +539,7 @@
 			}
 
 			ra.setStart(en, eo);
+            ed.selectionUtil.adjustForAnchorEdges(ra);
 			aft.appendChild(ra.cloneContents() || d.createTextNode('')); // Empty text node needed for Safari
 
 			// Create range around everything
@@ -533,19 +595,23 @@
 						nn = nn.appendChild(nl[i]);
 
 					// Padd most inner style element
-					nl[0].innerHTML = isOpera ? '\u00a0' : '<br />'; // Extra space for Opera so that the caret can move there
+                    nl[0].innerHTML = isOpera ? '\u00a0' : (isIE ? '' : '<br />'); // Extra space for Opera so that the caret can move there
 					return nl[0]; // Move caret to most inner element
 				} else
-					e.innerHTML = isOpera ? '\u00a0' : '<br />'; // Extra space for Opera so that the caret can move there
-			};
+                    e.innerHTML = isOpera ? '\u00a0' : (isIE ? '' : '<br />'); // Extra space for Opera so that the caret can move there
+			}
 				
 			// Padd empty blocks
 			if (dom.isEmpty(bef))
 				appendStyles(bef, sn);
 
-			// Fill empty afterblook with current style
+			// Fill empty afterblock with current style
+            car = aft;
+            while(car.firstChild && car.firstChild.nodeType == 1 && !/br|hr|img|input/i.test(car.firstChild.nodeName)){
+                car = car.firstChild;
+            }
 			if (dom.isEmpty(aft))
-				car = appendStyles(aft, en);
+				car = appendStyles(aft, en) || car;
 
 			// Opera needs this one backwards for older versions
 			if (isOpera && parseFloat(opera.version()) < 9.5) {
@@ -561,8 +627,9 @@
 			bef.normalize();
 
 			// Move cursor and scroll into view
-			ed.selection.select(aft, true);
-			ed.selection.collapse(true);
+            r.setStart(car, 0);
+            r.setEnd(car, 0);
+			ed.selection.setRng(r);
 
 			// scrollIntoView seems to scroll the parent window in most browsers now including FF 3.0b4 so it's time to stop using it and do it our selfs
 			y = ed.dom.getPos(aft).y;
@@ -584,7 +651,7 @@
 		},
 
 		backspaceDelete : function(e, bs) {
-			var t = this, ed = t.editor, b = ed.getBody(), dom = ed.dom, n, se = ed.selection, r = se.getRng(), sc = r.startContainer, n, w, tn, walker;
+			var t = this, ed = t.editor, b = ed.getBody(), dom = ed.dom, se = ed.selection, r = se.getRng(), sc = r.startContainer, n, w, tn, walker;
 
 			// Delete when caret is behind a element doesn't work correctly on Gecko see #3011651
 			if (!bs && r.collapsed && sc.nodeType == 1 && r.startOffset == sc.childNodes.length) {
@@ -609,18 +676,26 @@
 					n = sc;
 					while ((n = n.previousSibling) && !ed.dom.isBlock(n)) ;
 
+                    while(n && ed.dom.is(n, "table, tbody, tr, ul, ol")){
+                        n = n.lastChild;
+                    }
 					if (n) {
 						if (sc != b.firstChild) {
-							// Find last text node
-							w = ed.dom.doc.createTreeWalker(n, NodeFilter.SHOW_TEXT, null, FALSE);
-							while (tn = w.nextNode())
-								n = tn;
-
-							// Place caret at the end of last text node
-							r = ed.getDoc().createRange();
-							r.setStart(n, n.nodeValue ? n.nodeValue.length : 0);
-							r.setEnd(n, n.nodeValue ? n.nodeValue.length : 0);
-							se.setRng(r);
+                            //Find the last non-BR child of n.
+                            tn = n.lastChild;
+                            if(tn && tn.nodeName.toLowerCase() == "br"){
+                                tn = tn.previousSibling;
+                            }
+                            r = ed.getDoc().createRange();
+                            if(tn){
+                                //Put the cursor after tn.
+                                r.setStart(n, dom.nodeIndex(tn)+1);
+                            }else{
+                                //n is either empty or contains only a BR.  Cursor at start of n.
+                                r.setStart(n, 0);
+                            }
+                            r.collapse(true);
+                            se.setRng(r);
 
 							// Remove the target container
 							ed.dom.remove(sc);

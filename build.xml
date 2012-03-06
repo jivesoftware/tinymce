@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project name="TinyMCE" default="build" basedir=".">
 	<!-- Path properties -->
+	<property description="Source directory" name="src_dir" location="jscripts/tiny_mce" />
 	<property description="Classes directory" name="classes_dir" location="jscripts/tiny_mce/classes" />
-	<property description="Build directory" name="build_dir" location="jscripts/tiny_mce" />
+	<property description="Build directory" name="build_dir" location="build/tiny_mce" />
 	<property description="Temp directory" name="temp_dir" location="tmp" />
 	<property environment="env" />
 
@@ -61,6 +62,10 @@
 	<!-- Cleanup the build -->
 	<target name="clean" depends="" description="Cleans up the project from temporary files">
 		<delete dir="${temp_dir}" quiet="true" />
+		<delete dir="${build_dir}" quiet="true" />
+		<delete dir="${src_dir}" quiet="true">
+            <include name="**/editor_plugin.js" />
+		</delete>
 	</target>
 
 	<!-- Concat and minify classes and scripts -->
@@ -133,6 +138,7 @@
 			<fileset dir="${classes_dir}" includes="WindowManager.js" />
 			<fileset dir="${classes_dir}" includes="Formatter.js" />
 			<fileset dir="${classes_dir}" includes="LegacyInput.js" />
+			<fileset dir="${classes_dir}" includes="SelectionUtil.js" />
 		</concat>
 
 		<!-- Remove all jsdoc style comments -->
@@ -148,8 +154,20 @@
 		<yuicompress infile="${build_dir}/tiny_mce_prototype_src.js" outfile="${build_dir}/tiny_mce_prototype.js" />
 		<yuicompress infile="${build_dir}/tiny_mce_jquery_src.js" outfile="${build_dir}/tiny_mce_jquery.js" />
 
+        <!-- Copy other source files -->
+        <copy todir="${build_dir}">
+            <fileset dir="${src_dir}">
+                <include name="tiny_mce_dev.js" />
+                <include name="plugins/**" />
+                <include name="themes/**" />
+                <include name="langs/**" />
+                <include name="utils/**" />
+                <include name="license.txt" />
+            </fileset>
+        </copy>
+
 		<!-- Compress popup  -->
-		<yuicompress infile="${build_dir}/classes/Popup.js" outfile="${build_dir}/tiny_mce_popup.js" />
+		<yuicompress infile="${src_dir}/classes/Popup.js" outfile="${build_dir}/tiny_mce_popup.js" />
 		<concat destfile="${build_dir}/tiny_mce_popup.js.tmp">
 			<header filtering="no" trimleading="yes">
 				// Uncomment and change this document.domain value if you are loading the script cross subdomains
@@ -161,8 +179,8 @@
 		<move file="${build_dir}/tiny_mce_popup.js.tmp" tofile="${build_dir}/tiny_mce_popup.js" overwrite="true" />
 
 		<!-- Compress themes -->
-		<yuicompress infile="${build_dir}/themes/simple/editor_template_src.js" outfile="${build_dir}/themes/simple/editor_template.js" />
-		<yuicompress infile="${build_dir}/themes/advanced/editor_template_src.js" outfile="${build_dir}/themes/advanced/editor_template.js" />
+		<yuicompress infile="${src_dir}/themes/simple/editor_template_src.js" outfile="${build_dir}/themes/simple/editor_template.js" />
+		<yuicompress infile="${src_dir}/themes/advanced/editor_template_src.js" outfile="${build_dir}/themes/advanced/editor_template.js" />
 
 		<!-- Compress plugins -->
 		<for param="file">
@@ -197,7 +215,7 @@
 		</concat>
 	</target>
 
-	<target name="prepare-release-files" depends="build,moxiedoc">
+	<target name="prepare-release-files" depends="build">
 		<delete dir="${temp_dir}" quiet="true" />
 		<!-- Copy the current repos and start processing it -->
 		<copy todir="${temp_dir}/tinymce">
@@ -226,12 +244,12 @@
 			<substitution expression="${version.major}" />
 
 			<fileset dir="${temp_dir}/tinymce">
-				<include name="jscripts/tiny_mce/tiny_mce.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_src.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_jquery.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_jquery_src.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_prototype.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_prototype_src.js" />
+				<include name="build/tiny_mce/tiny_mce.js" />
+				<include name="build/tiny_mce/tiny_mce_src.js" />
+				<include name="build/tiny_mce/tiny_mce_jquery.js" />
+				<include name="build/tiny_mce/tiny_mce_jquery_src.js" />
+				<include name="build/tiny_mce/tiny_mce_prototype.js" />
+				<include name="build/tiny_mce/tiny_mce_prototype_src.js" />
 			</fileset>
 		</replaceregexp>
 
@@ -241,12 +259,12 @@
 			<substitution expression="${version.minor}" />
 
 			<fileset dir="${temp_dir}/tinymce">
-				<include name="jscripts/tiny_mce/tiny_mce.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_src.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_jquery.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_jquery_src.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_prototype.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_prototype_src.js" />
+				<include name="build/tiny_mce/tiny_mce.js" />
+				<include name="build/tiny_mce/tiny_mce_src.js" />
+				<include name="build/tiny_mce/tiny_mce_jquery.js" />
+				<include name="build/tiny_mce/tiny_mce_jquery_src.js" />
+				<include name="build/tiny_mce/tiny_mce_prototype.js" />
+				<include name="build/tiny_mce/tiny_mce_prototype_src.js" />
 			</fileset>
 		</replaceregexp>
 
@@ -256,12 +274,12 @@
 			<substitution expression="${release_date}" />
 
 			<fileset dir="${temp_dir}/tinymce">
-				<include name="jscripts/tiny_mce/tiny_mce.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_src.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_jquery.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_jquery_src.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_prototype.js" />
-				<include name="jscripts/tiny_mce/tiny_mce_prototype_src.js" />
+				<include name="build/tiny_mce/tiny_mce.js" />
+				<include name="build/tiny_mce/tiny_mce_src.js" />
+				<include name="build/tiny_mce/tiny_mce_jquery.js" />
+				<include name="build/tiny_mce/tiny_mce_jquery_src.js" />
+				<include name="build/tiny_mce/tiny_mce_prototype.js" />
+				<include name="build/tiny_mce/tiny_mce_prototype_src.js" />
 			</fileset>
 		</replaceregexp>
 	</target>

@@ -20,7 +20,8 @@
 					inline : 1
 				}, {
 					plugin_url : url,
-					style_text : ed.selection.getNode().style.cssText
+					style_text : ed.selection.getNode().style.cssText,
+                    cs_resource_base_url : CS_RESOURCE_BASE_URL
 				});
 			});
 

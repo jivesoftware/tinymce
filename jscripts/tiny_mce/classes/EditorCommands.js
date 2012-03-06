@@ -241,6 +241,19 @@
 
 			RemoveFormat : function(command) {
 				formatter.remove(command);
+
+                if(tinymce.isWebKit){
+                    //Workaround for webkit rendering bug. We have to force a redraw here. JIVE-2297
+                    var tables = dom.select("table");
+                    each(tables, function(n){
+                        dom.setStyle(n, "display", "inline-table");
+                    });
+                    setTimeout(function(){
+                        each(tables, function(n){
+                            dom.setStyle(n, "display", "");
+                        })
+                    }, 0);
+                }
 			},
 
 			mceBlockQuote : function(command) {

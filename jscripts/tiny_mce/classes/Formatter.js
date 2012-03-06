@@ -152,7 +152,12 @@
 		 * @param {Node} node Optional node to apply the format to defaults to current selection.
 		 */
 		function apply(name, vars, node) {
-			var formatList = get(name), format = formatList[0], bookmark, rng, i, isCollapsed = selection.isCollapsed();
+            var formatList = get(name);
+            if(formatList == null){
+                console.log("no such format: " + name);
+                return;
+            }
+            var format = formatList[0], bookmark, rng, i, isCollapsed = selection.isCollapsed();
 
 			/**
 			 * Moves the start to the first suitable text node.
@@ -295,6 +300,17 @@
 				wrapElm = dom.create(wrapName);
 				setElementFormat(wrapElm);
 
+                function getChildCount(node) {
+                    var count = 0;
+
+                    each(node.childNodes, function(node) {
+                        if (!isWhiteSpaceNode(node) && !isBookmarkNode(node))
+                            count++;
+                    });
+
+                    return count;
+                }
+
 				rangeUtils.walk(rng, function(nodes) {
 					var currentWrapElm;
 
@@ -303,6 +319,10 @@
 					 */
 					function process(node) {
 						var nodeName = node.nodeName.toLowerCase(), parentName = node.parentNode.nodeName.toLowerCase(), found;
+
+                        if((node.nodeType == 3 && node.nodeValue == "") || (isBookmarkNode(node))){
+                            return; //skip these; they shouldn't be formatted.
+                        }
 
 						// Stop wrapping on br elements
 						if (isEq(nodeName, 'br')) {
@@ -326,6 +346,17 @@
 							node = dom.rename(node, wrapName);
 							setElementFormat(node);
 							newWrappers.push(node);
+                            if(tinymce.isIE && getChildCount(node) == 0){
+                                (function(){
+                                    //JIVE-4296: create a temp node so that cursor positioning doesn't get too confused
+                                    var tmpNode = ed.getDoc().createTextNode(INVISIBLE_CHAR);
+                                    node.appendChild(tmpNode);
+                                    //schedule it for removal, after we're done with all this.
+                                    setTimeout(function(){
+                                        dom.remove(tmpNode);
+                                    }, 0);
+                                })();
+                            }
 							currentWrapElm = 0;
 							return;
 						}
@@ -376,7 +407,17 @@
 							// End the last wrapper
 							currentWrapElm = 0;
 						}
-					};
+
+                        if(newWrappers.length == 0 && isBlockContainer(node.nodeName.toLowerCase()) && getChildCount(node) == 0){
+                            //nothing was done. Line the block container with the format block
+                            currentWrapElm = wrapElm.cloneNode(FALSE);
+                            node.appendChild(currentWrapElm);
+                            newWrappers.push(currentWrapElm);
+                            while(node.firstChild != currentWrapElm){
+                                currentWrapElm.appendChild(node.firstChild);
+                            }
+                        }
+					}
 
 					// Process siblings from range
 					each(nodes, process);
@@ -410,17 +451,6 @@
 				each(newWrappers, function(node) {
 					var childCount;
 
-					function getChildCount(node) {
-						var count = 0;
-
-						each(node.childNodes, function(node) {
-							if (!isWhiteSpaceNode(node) && !isBookmarkNode(node))
-								count++;
-						});
-
-						return count;
-					};
-
 					function mergeStyles(node) {
 						var child, clone;
 
@@ -441,16 +471,16 @@
 						}
 
 						return clone || node;
-					};
+					}
 
 					childCount = getChildCount(node);
 
 					// Remove empty nodes but only if there is multiple wrappers and they are not block
 					// elements so never remove single <h1></h1> since that would remove the currrent empty block element where the caret is at
-					if ((newWrappers.length > 1 || !isBlock(node)) && childCount === 0) {
-						dom.remove(node, 1);
-						return;
-					}
+                    if (childCount === 0 && !(newWrappers.length <= 1 && node.parentNode && isBlockContainer(node.parentNode.nodeName.toLowerCase()))) {
+                        dom.remove(node, 1);
+                        return;
+                    }
 
 					if (format.inline || format.wrapper) {
 						// Merges the current node with it's children of similar type to reduce the number of elements
@@ -505,7 +535,8 @@
 						}
 					}
 				});
-			};
+                ed.onFormatChange.dispatch(format, true);
+			}
 
 			if (format) {
 				if (node) {
@@ -532,13 +563,12 @@
 						}
 
 						selection.moveToBookmark(bookmark);
-						selection.setRng(moveStart(selection.getRng(TRUE)));
 						ed.nodeChanged();
 					} else
 						performCaretAction('apply', name, vars);
 				}
 			}
-		};
+		}
 
 		/**
 		 * Removes the specified format from the current selection or specified node.
@@ -735,7 +765,8 @@
 						}
 					});
 				});
-			};
+                ed.onFormatChange.dispatch(format, false);
+			}
 
 			// Handle node
 			if (node) {
@@ -1675,6 +1706,10 @@
 			return /^(h[1-6]|p|div|pre|address|dl|dt|dd)$/.test(name);
 		};
 
+        function isBlockContainer(name) {
+            return /^(td|th|li|body)$/.test(name);
+        };
+
 		function getContainer(rng, start) {
 			var container, offset, lastIdx;
 
@@ -1741,7 +1776,18 @@
 
 			// Pending apply or remove formats
 			if (hasPending()) {
-				ed.getDoc().execCommand('FontName', false, 'mceinline');
+                if(tinymce.isIE && !tinymce.isIE9){
+				    ed.getDoc().execCommand('FontName', false, 'mceinline');
+                }else{
+                    //console.log("creating caret");
+                    var caret = dom.create("span", {style: "font-family: mceinline"});
+                    var newRng = selection.getRng(true);
+                    newRng.insertNode(caret);
+                    newRng.setStart(caret, 0);
+                    newRng.collapse(true);
+                    selection.setRng(newRng);
+                }
+
 				pendingFormats.lastRng = selection.getRng();
 
 				// IE will convert the current word

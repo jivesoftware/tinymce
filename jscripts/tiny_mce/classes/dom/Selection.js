@@ -283,6 +283,10 @@
 					}
 				}
 
+				// If start element is body element try to move to the first child if it exists
+				if (startElement && startElement.nodeName == 'BODY')
+					return startElement.firstChild || startElement;
+
 				return startElement;
 			} else {
 				startElement = rng.startContainer;
@@ -455,7 +459,7 @@
 			} else {
 				element = t.getNode();
 				name = element.nodeName;
-				if (name == 'IMG')
+				if (name == 'IMG' && rng.toString() == "")
 					return {name : name, index : findIndex(name, element)};
 
 				// W3C method
@@ -604,8 +608,8 @@
 
 					function addBogus(node) {
 						// Adds a bogus BR element for empty block elements or just a space on IE since it renders BR elements incorrectly
-						if (dom.isBlock(node) && !node.innerHTML)
-							node.innerHTML = !isIE ? '<br data-mce-bogus="1" />' : ' ';
+                        if (!isIE && dom.isBlock(node) && !node.innerHTML)
+                            node.innerHTML = '<br data-mce-bogus="1" />';
 
 						return node;
 					};
@@ -1036,7 +1040,7 @@
 				}
 
 				return rng;
-			};
+			}
 
 			// Fires while the selection is changing
 			function selectionChange(e) {
@@ -1058,6 +1062,7 @@
 					}
 				} else
 					endSelection();
+                return false;
 			}
 
 			// Removes listeners
@@ -1071,7 +1076,7 @@
 				dom.unbind(doc, 'mouseup', endSelection);
 				dom.unbind(doc, 'mousemove', selectionChange);
 				startRng = started = 0;
-			};
+			}
 
 			// Detect when user selects outside BODY
 			dom.bind(doc, ['mousedown', 'contextmenu'], function(e) {
@@ -1095,7 +1100,8 @@
 						dom.win.focus();
 						startRng.select();
 					}
-				}
+                    return false;
+                }
 			});
 		}
 	});
