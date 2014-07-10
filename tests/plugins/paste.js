@@ -204,9 +204,9 @@ test("Paste Word links", function() {
 				'<a href="#_ftnref238571849" name="_ftn238571849">[5]</a>' +
 				'<a href="#_edn238571849" name="_ednref238571849">[6]</a>' +
 				'<a href="#_ednref238571849" name="_edn238571849">[7]</a>' +
-				'<a href="http://www.tinymce.com/someurl">8</a>' +
+				'<a href="http://domain.tinymce.com/someurl">8</a>' +
 				'<a name="#unknown">9</a>' +
-				'<a href="http://www.tinymce.com/someurl" name="named_link">named_link</a>' +
+				'<a href="http://domain.tinymce.com/someurl" name="named_link">named_link</a>' +
 				'<a>5</a>' +
 			'</p>'
 		)
@@ -222,7 +222,7 @@ test("Paste Word links", function() {
 			'<a href="#_ftnref238571849" name="_ftn238571849">[5]</a>' +
 			'<a href="#_edn238571849" name="_ednref238571849">[6]</a>' +
 			'<a href="#_ednref238571849" name="_edn238571849">[7]</a>' +
-			'<a href="http://www.tinymce.com/someurl">8</a>' +
+			'<a href="http://domain.tinymce.com/someurl">8</a>' +
 			'9' +
 			'named_link' +
 			'5' +
@@ -278,6 +278,82 @@ test('paste track changes comment', function() {
 	});
 
 	equal(editor.getContent(), '<p>1</p>');
+});
+	
+test('paste nested (UL) word list', function() {
+	editor.setContent('');
+
+	editor.execCommand('mceInsertClipboardContent', false, {
+		content: (
+			"<p class=MsoListParagraphCxSpFirst style='text-indent:-18.0pt;mso-list:l0 level1 lfo1'>" +
+			"<![if !supportLists]><span	style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:Symbol'>" +
+			"<span style='mso-list:Ignore'>·<span style='font:7.0pt \"Times New Roman\"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" +
+			"</span></span></span><![endif]>a</p>" +
+
+			"<p class=MsoListParagraphCxSpMiddle style='margin-left:72.0pt;mso-add-space:auto;text-indent:-18.0pt;mso-list:l0 level2 lfo1'>" +
+			"<![if !supportLists]><span style='font-family:\"Courier New\";mso-fareast-font-family:\"Courier New\"'>" +
+			"<span style='mso-list:Ignore'>o<span style='font:7.0pt \"Times New Roman\"'>&nbsp;&nbsp;</span></span></span><![endif]>b</p>" +
+
+			"<p class=MsoListParagraphCxSpLast style='margin-left:108.0pt;mso-add-space:auto;text-indent:-18.0pt;mso-list:l0 level3 lfo1'>" +
+			"<![if !supportLists]><span style='font-family:Wingdings;mso-fareast-font-family:Wingdings;mso-bidi-font-family:Wingdings'>" +
+			"<span style='mso-list:Ignore'>§<span style='font:7.0pt \"Times New Roman\"'>&nbsp;</span></span></span><![endif]>c 1. x</p>"
+		)
+	});
+
+	equal(
+		editor.getContent(),
+		'<ul>'+
+			'<li>a' +
+				'<ul>' +
+					'<li>b' +
+						'<ul>' +
+							'<li>c 1. x</li>' +
+						'</ul>' +
+					'</li>' +
+				'</ul>' +
+			'</li>' +
+		'</ul>'
+	);
+});
+
+test('paste nested (OL) word list', function() {
+	editor.setContent('');
+
+	editor.execCommand('mceInsertClipboardContent', false, {
+		content: (
+			"<p class=MsoListParagraphCxSpFirst style='text-indent:-18.0pt;mso-list:l0 level1 lfo1'>" +
+			"<![if !supportLists]><span style='mso-bidi-font-family:Calibri;mso-bidi-theme-font:minor-latin'>" +
+			"<span style='mso-list:Ignore'>1.<span style='font:7.0pt \"Times New Roman\"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>" +
+			"</span></span><![endif]>a</p>" +
+
+			"<p class=MsoListParagraphCxSpMiddle style='margin-left:72.0pt;mso-add-space:auto;text-indent:-18.0pt;mso-list:l0 level2 lfo1'>" +
+			"<![if !supportLists]><span style='mso-bidi-font-family:Calibri;mso-bidi-theme-font:minor-latin'><span style='mso-list:Ignore'>a." +
+			"<span style='font:7.0pt \"Times New Roman\"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></span></span><![endif]>b</p>" +
+
+			"<p class=MsoListParagraphCxSpLast style='margin-left:108.0pt;mso-add-space:auto;text-indent:-108.0pt;mso-text-indent-alt:-9.0pt;mso-list:l0 level3 lfo1'>" +
+			"<![if !supportLists]><span style='mso-bidi-font-family:Calibri;mso-bidi-theme-font:minor-latin'><span style='mso-list:Ignore'>" +
+			"<span style='font:7.0pt \"Times New Roman\"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" +
+			"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" +
+			"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" + 
+			"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>i.<span style='font:7.0pt \"Times New Roman\"'>" +
+			"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></span></span><![endif]>c</p>"
+		)
+	});
+
+	equal(
+		editor.getContent(),
+		'<ol>'+
+			'<li>a' +
+				'<ol>' +
+					'<li>b' +
+						'<ol>' +
+							'<li>c</li>' +
+						'</ol>' +
+					'</li>' +
+				'</ol>' +
+			'</li>' +
+		'</ol>'
+	);
 });
 
 test("Paste paste_merge_formats: true", function() {
@@ -509,6 +585,10 @@ test('trim html from clipboard fragments', function() {
 	equal(tinymce.pasteplugin.Utils.trimHtml('a\n<body>\n<!--StartFragment-->\nb\n<!--EndFragment-->\n</body>\nc'), '\nb\n');
 	equal(tinymce.pasteplugin.Utils.trimHtml('a<!--StartFragment-->b<!--EndFragment-->c'), 'abc');
 	equal(tinymce.pasteplugin.Utils.trimHtml('a<body>b</body>c'), 'b');
+	equal(tinymce.pasteplugin.Utils.trimHtml('a<span class="Apple-converted-space">\u00a0<\/span>b'), 'a b');
+	equal(tinymce.pasteplugin.Utils.trimHtml('<span class="Apple-converted-space">\u00a0<\/span>b'), ' b');
+	equal(tinymce.pasteplugin.Utils.trimHtml('a<span class="Apple-converted-space">\u00a0<\/span>'), 'a ');
+	equal(tinymce.pasteplugin.Utils.trimHtml('<span class="Apple-converted-space">\u00a0<\/span>'), ' ');
 });
 
 if (tinymce.Env.webkit) {

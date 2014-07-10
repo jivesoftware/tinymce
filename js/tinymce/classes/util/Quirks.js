@@ -85,7 +85,7 @@ define("tinymce/util/Quirks", [
 		 *  7. Delete by selecting contents and writing a character.'
 		 *
 		 * This code is a ugly hack since writing full custom delete logic for just this bug
-		 * fix seemed like a huge task. I hope we can remove this before the year 2030. 
+		 * fix seemed like a huge task. I hope we can remove this before the year 2030.
 		 */
 		function cleanupStylesWhenDeleting() {
 			var doc = editor.getDoc(), urlPrefix = 'data:text/mce-internal,';
@@ -435,6 +435,11 @@ define("tinymce/util/Quirks", [
 		function removeHrOnBackspace() {
 			editor.on('keydown', function(e) {
 				if (!isDefaultPrevented(e) && e.keyCode === BACKSPACE) {
+					// Check if there is any HR elements this is faster since getRng on IE 7 & 8 is slow
+					if (!editor.getBody().getElementsByTagName('hr').length) {
+						return;
+					}
+
 					if (selection.isCollapsed() && selection.getRng(true).startOffset === 0) {
 						var node = selection.getNode();
 						var previousSibling = node.previousSibling;
@@ -496,8 +501,6 @@ define("tinymce/util/Quirks", [
 				if (e.nodeName == 'A' && dom.hasClass(e, 'mce-item-anchor')) {
 					selection.select(e);
 				}
-
-				editor.nodeChanged();
 			});
 		}
 
@@ -1127,8 +1130,27 @@ define("tinymce/util/Quirks", [
 			});
 		}
 
+		/**
+		 * Sometimes WebKit/Blink generates BR elements with the Apple-interchange-newline class.
+		 *
+		 * Scenario:
+		 *  1) Create a table 2x2.
+		 *  2) Select and copy cells A2-B2.
+		 *  3) Paste and it will add BR element to table cell.
+		 */
+		function removeAppleInterchangeBrs() {
+			parser.addNodeFilter('br', function(nodes) {
+				var i = nodes.length;
+
+				while (i--) {
+					if (nodes[i].attr('class') == 'Apple-interchange-newline') {
+						nodes[i].remove();
+					}
+				}
+			});
+		}
+
 		// All browsers
-		disableBackspaceIntoATable();
 		removeBlockQuoteOnBackSpace();
 		emptyEditorWhenDeleting();
 		normalizeSelection();
@@ -1140,6 +1162,8 @@ define("tinymce/util/Quirks", [
 			selectControlElements();
 			setDefaultBlockType();
 			blockFormSubmitInsideEditor();
+			disableBackspaceIntoATable();
+			removeAppleInterchangeBrs();
 
 			// iOS
 			if (Env.iOS) {
@@ -1167,6 +1191,7 @@ define("tinymce/util/Quirks", [
 		if (Env.ie >= 11) {
 			bodyHeight();
 			doubleTrailingBrElements();
+			disableBackspaceIntoATable();
 		}
 
 		if (Env.ie) {
@@ -1184,6 +1209,7 @@ define("tinymce/util/Quirks", [
 			removeGhostSelection();
 			showBrokenImageIcon();
 			blockCmdArrowNavigation();
+			disableBackspaceIntoATable();
 		}
 	};
 });
